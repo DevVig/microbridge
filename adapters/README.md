@@ -7,9 +7,8 @@ checklist, and [docs/protocol.md](../docs/protocol.md) for the wire format.
 | Adapter | Status | Language |
 |---|---|---|
 | [`reference-echo`](reference-echo/) | working example | Node (no deps) |
-| `cursor` | wanted — see adapter issues | — |
-| `t3code` | wanted — see adapter issues | — |
+| [`cursor`](cursor/) | scaffold — awaiting session source | Node |
+| [`t3code`](t3code/) | scaffold — awaiting session source | Node |
 
 First-party adapters (Codex CLI, Claude Code) are compiled into the daemon
-and live in `crates/`, not here — see
-[docs/architecture.md](../docs/architecture.md).
+(`crates/mb-adapters`) — see [docs/architecture.md](../docs/architecture.md).

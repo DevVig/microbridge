@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/mb-protocol", "crates/mb-device", "crates/microbridged"]
+members = [
+    "crates/mb-protocol",
+    "crates/mb-device",
+    "crates/mb-adapters",
+    "crates/microbridged",
+    "crates/microbridgectl",
+]
 
 [workspace.package]
 version = "0.0.1"
@@ -11,9 +17,12 @@ repository = "https://github.com/DevVig/microbridge"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+notify = "7"
+thiserror = "2"
 
 [profile.release]
 strip = true

@@ -1,0 +1,357 @@
+import type { DaemonConfig, Snapshot } from "../lib/types";
+import { STATE_COLORS, STATE_LABELS } from "../lib/types";
+import { DARK, LIGHT } from "../lib/theme";
+
+const KEY_SOURCES: { id: DaemonConfig["key_source"]; label: string; hint: string }[] = [
+  {
+    id: "most_recent",
+    label: "Most recent",
+    hint: "Cross-app — six newest threads (default)",
+  },
+  {
+    id: "focused_app",
+    label: "Focused app",
+    hint: "Repopulate from whichever IDE owns the deck",
+  },
+  {
+    id: "pinned",
+    label: "Pinned",
+    hint: "Follow the first six pinned sessions",
+  },
+  {
+    id: "priority",
+    label: "Priority",
+    hint: "Approvals and active threads first",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    hint: "Pin specific threads to specific keys",
+  },
+];
+
+type Tab = "keys" | "agent" | "adapters" | "device";
+
+export function Settings({
+  snapshot,
+  dark,
+  tab,
+  onTab,
+  onConfig,
+  onClose,
+}: {
+  snapshot: Snapshot;
+  dark: boolean;
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  onConfig: (config: DaemonConfig) => void;
+  onClose: () => void;
+}) {
+  const t = dark ? DARK : LIGHT;
+  const cfg = snapshot.config;
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "keys", label: "Keys" },
+    { id: "agent", label: "Agent Keys" },
+    { id: "adapters", label: "Adapters" },
+    { id: "device", label: "Device" },
+  ];
+
+  return (
+    <div
+      className="flex min-h-screen w-full"
+      style={{
+        background: dark ? "#0A0A0B" : "#E9E9E7",
+        fontFamily: "Inter, system-ui, sans-serif",
+        color: t.text,
+      }}
+    >
+      <aside
+        className="flex w-[200px] flex-col border-r px-3 py-4"
+        style={{
+          borderColor: t.hairline,
+          backgroundColor: t.panel,
+        }}
+      >
+        <div className="mb-4 px-2 text-[13px] font-semibold">Microbridge</div>
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onTab(item.id)}
+            className="mb-0.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium"
+            style={{
+              backgroundColor: tab === item.id ? t.hoverBg : "transparent",
+              color: tab === item.id ? t.text : t.textSecondary,
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-auto rounded-lg px-2.5 py-2 text-left text-[12px]"
+          style={{ color: t.textSecondary }}
+        >
+          Back to popover
+        </button>
+      </aside>
+
+      <main className="flex-1 overflow-auto p-6">
+        {tab === "agent" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">Agent Keys</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              Six keys, six threads. Command presses always route to the focused
+              thread.
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {snapshot.agent_key_session_ids.map((id, i) => {
+                const s = id
+                  ? snapshot.sessions.find((x) => x.id === id)
+                  : null;
+                return (
+                  <div
+                    key={i}
+                    className="rounded-xl p-3"
+                    style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                  >
+                    <div className="text-[11px]" style={{ color: t.textMuted }}>
+                      AG{i + 1}
+                    </div>
+                    {s ? (
+                      <>
+                        <div className="mt-1 text-[12px] font-medium">{s.app}</div>
+                        <div className="truncate text-[11px]" style={{ color: t.textSecondary }}>
+                          {s.title || s.id}
+                        </div>
+                        <span
+                          className="mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          style={{
+                            backgroundColor: `${STATE_COLORS[s.state]}22`,
+                            color: STATE_COLORS[s.state],
+                          }}
+                        >
+                          {STATE_LABELS[s.state]}
+                        </span>
+                      </>
+                    ) : (
+                      <div className="mt-2 text-[12px]" style={{ color: t.textMuted }}>
+                        Unassigned
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <h2 className="mt-6 text-[13px] font-semibold">Key source</h2>
+            <div className="mt-2 space-y-1.5">
+              {KEY_SOURCES.map((src) => (
+                <label
+                  key={src.id}
+                  className="flex cursor-pointer items-start gap-2 rounded-xl px-3 py-2.5"
+                  style={{
+                    backgroundColor:
+                      cfg.key_source === src.id ? t.hoverBg : t.panel,
+                    border: `1px solid ${t.hairline}`,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="key_source"
+                    checked={cfg.key_source === src.id}
+                    onChange={() =>
+                      onConfig({ ...cfg, key_source: src.id })
+                    }
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block text-[12.5px] font-medium">
+                      {src.label}
+                    </span>
+                    <span
+                      className="block text-[11px]"
+                      style={{ color: t.textSecondary }}
+                    >
+                      {src.hint}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <label className="mt-4 flex items-center gap-2 text-[12.5px]">
+              <input
+                type="checkbox"
+                checked={cfg.approvals_interrupt}
+                onChange={(e) =>
+                  onConfig({ ...cfg, approvals_interrupt: e.target.checked })
+                }
+              />
+              Approvals interrupt focus
+            </label>
+          </section>
+        )}
+
+        {tab === "device" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">Device</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              Appearance, lighting, and sleep. Zero network — local socket + USB
+              only.
+            </p>
+
+            <h2 className="mt-5 text-[13px] font-semibold">Appearance</h2>
+            <div className="mt-2 flex gap-2">
+              {(["system", "light", "dark"] as const).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => onConfig({ ...cfg, appearance: a })}
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-medium capitalize"
+                  style={{
+                    backgroundColor:
+                      cfg.appearance === a ? t.hoverBg : t.panel,
+                    border: `1px solid ${t.hairline}`,
+                    color: t.text,
+                  }}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+
+            <h2 className="mt-5 text-[13px] font-semibold">Lighting</h2>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
+                style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                onClick={() =>
+                  onConfig({ ...cfg, lighting_preset: "codex" })
+                }
+              >
+                Codex defaults
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
+                style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                onClick={() =>
+                  onConfig({ ...cfg, lighting_preset: "phosphor" })
+                }
+              >
+                Phosphor
+              </button>
+            </div>
+
+            <label className="mt-5 block text-[12.5px]">
+              Brightness ({cfg.brightness}%)
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={cfg.brightness}
+                onChange={(e) =>
+                  onConfig({ ...cfg, brightness: Number(e.target.value) })
+                }
+                className="mt-1 block w-full max-w-sm"
+              />
+            </label>
+
+            <p className="mt-6 text-[11px]" style={{ color: t.textMuted }}>
+              Device: {snapshot.device_name}
+              {snapshot.device_connected ? " · connected" : " · not connected"}
+              {" · "}sleep {cfg.sleep_minutes}m
+            </p>
+          </section>
+        )}
+
+        {tab === "adapters" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">Adapters</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              First-party adapters run in-process. Community adapters speak
+              NDJSON on the local socket.
+            </p>
+            <ul className="mt-4 space-y-2">
+              {[
+                { name: "Codex CLI", kind: "Native", note: "watches ~/.codex/sessions" },
+                { name: "Claude Code", kind: "Native", note: "watches ~/.claude/projects" },
+                { name: "Cursor", kind: "Community", note: "scaffold — adapters/cursor" },
+                { name: "T3 Code", kind: "Community", note: "scaffold — adapters/t3code" },
+              ].map((a) => (
+                <li
+                  key={a.name}
+                  className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                  style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                >
+                  <div>
+                    <div className="text-[12.5px] font-medium">{a.name}</div>
+                    <div className="text-[11px]" style={{ color: t.textSecondary }}>
+                      {a.note}
+                    </div>
+                  </div>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    style={{ backgroundColor: t.hoverBg, color: t.textSecondary }}
+                  >
+                    {a.kind}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {tab === "keys" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">Keys</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              Remap command keys, dial, and joystick in a later revision. Agent
+              Keys are thread-owned — configure them under Agent Keys.
+            </p>
+            <div
+              className="mt-6 max-w-md rounded-2xl p-6"
+              style={{
+                backgroundColor: "#F7F7F5",
+                border: "1px solid rgba(0,0,0,0.08)",
+                color: "#0D0D0D",
+              }}
+            >
+              <p className="text-[12px] font-medium">Device twin</p>
+              <p className="mt-1 text-[11px]" style={{ color: "#6E6E73" }}>
+                Photo-accurate twin from MagicPath (
+                <code>cool-gulf-2537</code>) — live LED echo uses bus state
+                below.
+              </p>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {snapshot.agent_key_session_ids.map((id, i) => {
+                  const s = id
+                    ? snapshot.sessions.find((x) => x.id === id)
+                    : null;
+                  const c = s ? STATE_COLORS[s.state] : "#E9E9E6";
+                  return (
+                    <div
+                      key={i}
+                      className="flex h-12 items-center justify-center rounded-lg text-[11px] font-medium"
+                      style={{
+                        background:
+                          "linear-gradient(180deg, rgba(255,255,255,0.85), rgba(230,230,226,0.9))",
+                        boxShadow: s ? `inset 0 0 12px ${c}88` : "none",
+                        border: "1px solid rgba(0,0,0,0.1)",
+                      }}
+                    >
+                      AG{i + 1}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
