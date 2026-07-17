@@ -7,7 +7,7 @@
 | `microbridged` | resident daemon (launchd agent) | Rust | yes |
 | First-party adapters (Codex CLI, Claude Code) | in-process modules of the daemon | Rust | bundled |
 | Community adapters | separate processes on the socket | any | optional |
-| Menu bar app | tray app talking to the same socket | Tauri 2 + React (`apps/microbridge-ui`) | optional, quit-able |
+| Menu bar app | primary UI (tray + settings + focus HUD) | Tauri 2 + React (`apps/microbridge-ui`) | yes (default install) |
 
 The daemon owns three things: the **status bus** (session registry fed by
 adapters), the **focus policy** (which session owns the deck), and the

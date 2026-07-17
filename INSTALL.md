@@ -1,8 +1,8 @@
 # Installing Microbridge
 
-Microbridge is a local daemon plus an optional companion UI. There is **no
-cloud account** — install puts binaries on your machine and runs a user-level
-service.
+Microbridge installs a **menu bar app** (primary UI for the keyboard) plus a
+local daemon that drives the Micro. There is **no cloud account** — everything
+runs on your machine.
 
 ## Recommended on macOS: Homebrew (with updates)
 
@@ -51,8 +51,7 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 | Piece | Need |
 |---|---|
 | Daemon (Homebrew) | Homebrew; Rust pulled in as a build dependency |
-| Daemon (from source) | Rust stable (`rustup`), macOS 13+ or Linux |
-| Companion UI (optional) | Node ≥ 20; full `.app` also needs Xcode CLT |
+| Full install (from source) | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
 | Hardware LEDs | Codex Micro over USB (HID packing still landing — mock works without hardware) |
 
 ## From source (developers)
@@ -60,21 +59,14 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 ```sh
 git clone https://github.com/DevVig/microbridge.git
 cd microbridge
-./scripts/install.sh              # macOS: binaries + launchd
-# ./scripts/install.sh --with-ui
+./scripts/install.sh                 # macOS: daemon + menu bar app + launchd
+# ./scripts/install.sh --no-ui       # daemon/CLI only (headless)
 # ./scripts/install-linux-systemd.sh
-microbridgectl status
 ```
 
 Uninstall: `./scripts/uninstall.sh` (add `--purge` to remove `~/.microbridge`).
 
-### Optional companion UI
-
-```sh
-./scripts/install.sh --with-ui
-# or during development:
-cd apps/microbridge-ui && npm install && npm run dev
-```
+During UI development: `cd apps/microbridge-ui && npm install && npm run tauri dev`.
 
 ## Linux
 

@@ -33,7 +33,7 @@ End-user install paths are documented in [INSTALL.md](INSTALL.md)
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-# optional UI:
+# menu bar app:
 cd apps/microbridge-ui && npm ci && npm run build
 ```
 
