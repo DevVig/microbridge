@@ -82,20 +82,24 @@ docs/                  protocol, architecture, adapter guide, design, HID notes
 
 ## Install
 
-Full guide: **[INSTALL.md](INSTALL.md)**.
+Full guide: **[INSTALL.md](INSTALL.md)**. Governance / branch rules: **[docs/governance.md](docs/governance.md)**.
+
+**macOS (recommended — Homebrew, with upgrades):**
 
 ```sh
-git clone https://github.com/DevVig/microbridge.git
-cd microbridge
-./scripts/install.sh              # macOS: binaries + launchd
-# ./scripts/install.sh --with-ui  # also build companion UI
-# ./scripts/install-linux-systemd.sh   # Linux systemd --user
-microbridgectl status
+brew tap DevVig/microbridge https://github.com/DevVig/microbridge
+brew install microbridge
+brew services start microbridge
+# updates: brew update && brew upgrade microbridge
+# optional background updates: brew autoupdate start --upgrade --cleanup
 ```
 
-Uninstall: `./scripts/uninstall.sh` (add `--purge` to remove `~/.microbridge`).
+From source / Linux:
 
-From a GitHub Release (after a `v*` tag): `./scripts/install-from-release.sh`.
+```sh
+./scripts/install.sh                 # macOS launchd
+./scripts/install-linux-systemd.sh   # Linux systemd --user
+```
 
 ## Building (dev)
 

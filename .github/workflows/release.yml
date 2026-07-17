@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   build:
@@ -18,7 +19,7 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -29,8 +30,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: |
-          cargo build --release -p microbridged -p microbridgectl --target ${{ matrix.target }}
+        run: cargo build --release -p microbridged -p microbridgectl --target ${{ matrix.target }}
       - name: Package
         run: |
           STAGE=microbridge-${{ github.ref_name }}-${{ matrix.target }}
@@ -64,10 +64,46 @@ jobs:
           generate_release_notes: true
           files: release-assets/*
           body: |
-            ## Install
+            ## Install (macOS)
 
             ```sh
-            ./scripts/install-from-release.sh ${{ github.ref_name }}
+            brew tap DevVig/microbridge https://github.com/DevVig/microbridge
+            brew install microbridge
+            brew services start microbridge
             ```
 
-            Or from source: see [INSTALL.md](INSTALL.md).
+            Upgrade later: `brew update && brew upgrade microbridge`
+
+            Binary archive: `./scripts/install-from-release.sh ${{ github.ref_name }}`
+
+            Full guide: [INSTALL.md](INSTALL.md).
+
+  bump-formula:
+    name: bump Homebrew formula
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - name: Bump Formula url + sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/bump-formula.sh
+          ./scripts/bump-formula.sh "${{ github.ref_name }}"
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(brew): bump formula to ${{ github.ref_name }}"
+          title: "chore(brew): bump formula to ${{ github.ref_name }}"
+          body: |
+            Auto-bump `Formula/microbridge.rb` after release `${{ github.ref_name }}`.
+
+            After merge, users get the new version via:
+            ```sh
+            brew update && brew upgrade microbridge
+            ```
+          branch: chore/brew-${{ github.ref_name }}
+          delete-branch: true

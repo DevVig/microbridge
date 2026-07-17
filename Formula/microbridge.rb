@@ -1,11 +1,21 @@
-# Homebrew formula (build-from-source until a tap/bottle is published).
+# typed: false
+# frozen_string_literal: true
+
+# Homebrew formula for Microbridge (source build — fast enough for alpha).
 #
-#   brew install --build-from-source ./Formula/microbridge.rb
+#   brew tap DevVig/microbridge https://github.com/DevVig/microbridge
+#   brew install microbridge
 #   brew services start microbridge
+#
+# Upgrade (auto-update path):
+#   brew update && brew upgrade microbridge
+#   brew autoupdate start --upgrade --cleanup   # optional background updates
 #
 class Microbridge < Formula
   desc "Open-source control plane for the Codex Micro"
   homepage "https://github.com/DevVig/microbridge"
+  url "https://github.com/DevVig/microbridge/archive/refs/tags/v0.0.1.tar.gz"
+  sha256 "f171c275890add016045b0bbde54330f104b6d5db3a9d16c8d366cd5fcdde599"
   license any_of: ["MIT", "Apache-2.0"]
   head "https://github.com/DevVig/microbridge.git", branch: "main"
 
@@ -28,9 +38,10 @@ class Microbridge < Formula
 
   def caveats
     <<~EOS
-      Config and socket live in ~/.microbridge/
-      Check the bus with: microbridgectl status
-      Full install notes: #{doc}/INSTALL.md (or INSTALL.md in the repo)
+      Config and socket: ~/.microbridge/
+      Status:            microbridgectl status
+      Upgrade:           brew update && brew upgrade microbridge
+      Background updates: brew autoupdate start --upgrade --cleanup
     EOS
   end
 

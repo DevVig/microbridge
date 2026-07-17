@@ -41,3 +41,6 @@ jobs:
           cache-dependency-path: apps/microbridge-ui/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  # Keep required-check names stable for the main branch ruleset.
+  # Job names above are what GitHub shows as status contexts.
