@@ -1,0 +1,11 @@
+[package]
+name = "mb-device"
+description = "Device abstraction for Microbridge output hardware"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+mb-protocol = { path = "../mb-protocol" }
+tracing = { workspace = true }

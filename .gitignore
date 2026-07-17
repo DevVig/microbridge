@@ -1,0 +1,6 @@
+/target
+node_modules/
+.DS_Store
+
+# local working notes (not part of the public project)
+/documentation/

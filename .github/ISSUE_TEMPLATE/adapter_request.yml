@@ -1,0 +1,28 @@
+name: Adapter request
+description: Request (or volunteer to build) an adapter for an agent runtime
+labels: [adapter]
+body:
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / app
+      placeholder: e.g. Windsurf, OpenCode, Zed
+    validations:
+      required: true
+  - type: textarea
+    id: state-source
+    attributes:
+      label: Where could agent state come from?
+      description: Hooks, session files on disk, a local API? Links appreciated — this is the hard part.
+    validations:
+      required: true
+  - type: dropdown
+    id: volunteering
+    attributes:
+      label: Are you volunteering to build it?
+      options:
+        - "Yes — I'll open a PR"
+        - "Maybe, with guidance"
+        - "No, just requesting"
+    validations:
+      required: true

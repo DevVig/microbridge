@@ -1,0 +1,30 @@
+name: Bug report
+description: Something misbehaves in the daemon, an adapter, or the device layer
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: v0.0.1 or a short SHA
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15.5, Apple Silicon
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon logs
+      description: Run with `RUST_LOG=debug` and paste the relevant lines.
+      render: text

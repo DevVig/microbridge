@@ -1,0 +1,19 @@
+name: Feature request
+description: Propose a change to the daemon, protocol, or UI
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+  - type: textarea
+    id: footprint
+    attributes:
+      label: Footprint impact
+      description: Does this add any idle CPU, memory, or network to the daemon? The budget is a hard constraint.
