@@ -146,9 +146,9 @@ pub fn apply_event(snap: &mut Snapshot, event: BusEvent) {
 }
 
 /// Spawn reconnecting subscribe loop. Returns a handle for short-lived writes
-/// and a channel of inbound Snapshot / Event / Config messages.
-pub fn spawn_bus_loop() -> (BusHandle, mpsc::UnboundedReceiver<ServerMessage>) {
-    let (tx, rx) = mpsc::unbounded_channel();
+/// and a bounded channel of inbound Snapshot / Event / Config messages.
+pub fn spawn_bus_loop() -> (BusHandle, mpsc::Receiver<ServerMessage>) {
+    let (tx, rx) = mpsc::channel(256);
     tauri::async_runtime::spawn(async move {
         loop {
             let _ = run_subscribe_once(&tx).await;
@@ -159,7 +159,7 @@ pub fn spawn_bus_loop() -> (BusHandle, mpsc::UnboundedReceiver<ServerMessage>) {
 }
 
 async fn run_subscribe_once(
-    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tx: &mpsc::Sender<ServerMessage>,
 ) -> Result<(), String> {
     let (mut write, reader) = open_ui_client().await?;
     write_msg(&mut write, &ClientMessage::Subscribe).await?;
@@ -175,7 +175,7 @@ async fn run_subscribe_once(
         }
         let msg: ServerMessage =
             serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
-        if tx.send(msg).is_err() {
+        if tx.send(msg).await.is_err() {
             break;
         }
     }

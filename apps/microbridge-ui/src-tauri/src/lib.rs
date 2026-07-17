@@ -60,11 +60,12 @@ fn show_hud(app: &AppHandle) {
     };
     if let Ok(Some(monitor)) = window.current_monitor() {
         let screen = monitor.size();
+        let origin = monitor.position();
         let Ok(size) = window.outer_size() else {
             return;
         };
-        let x = ((screen.width.saturating_sub(size.width)) / 2) as i32;
-        let y = (screen.height as f64 * 0.12).round() as i32;
+        let x = origin.x + ((screen.width.saturating_sub(size.width)) / 2) as i32;
+        let y = origin.y + (screen.height as f64 * 0.12).round() as i32;
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
     }
     let _ = window.show();
@@ -238,6 +239,16 @@ pub fn run() {
                 popover.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {
                         let _ = popover_hide.hide();
+                    }
+                });
+            }
+
+            if let Some(settings) = app.get_webview_window("settings") {
+                let settings_hide = settings.clone();
+                settings.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = settings_hide.hide();
                     }
                 });
             }

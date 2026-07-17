@@ -86,11 +86,8 @@ impl DaemonState {
 
     pub fn set_config(&mut self, config: DaemonConfig) {
         let prev_focus = self.registry.focused.clone();
-        // Preserve live frontmost unless the client explicitly cleared it.
-        let frontmost = config
-            .frontmost_app
-            .clone()
-            .or_else(|| self.config.frontmost_app.clone());
+        // `frontmost_app` is watcher-owned runtime state — clients cannot set it.
+        let frontmost = self.config.frontmost_app.clone();
         self.config = config;
         self.config.frontmost_app = frontmost;
         if let Err(error) = save_config(&self.config) {

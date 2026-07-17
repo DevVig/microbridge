@@ -109,9 +109,8 @@ impl Device for MockDevice {
             agent_key_count: AGENT_KEY_COUNT,
             has_dial: true,
             has_joystick: true,
-            // Simulator is "attached" so the menu bar UI is usable without HID.
-            // Real HidDevice reports connected only when a USB device is claimed.
-            connected: true,
+            // Not a physical device — UI treats `device_name == "mock"` as simulator.
+            connected: false,
         }
     }
 

@@ -5,10 +5,7 @@
 //! the poll later; the important property is that the daemon (not the UI)
 //! owns this signal so `--no-ui` still works.
 
-use std::time::Duration;
-
 use tokio::sync::mpsc;
-use tracing::debug;
 
 /// Spawn a background task that emits localized app names when the frontmost
 /// app changes. Non-macOS builds emit nothing.
@@ -25,6 +22,10 @@ pub fn spawn_frontmost_watcher(tx: mpsc::UnboundedSender<Option<String>>) {
 
 #[cfg(target_os = "macos")]
 fn spawn_macos_watcher(tx: mpsc::UnboundedSender<Option<String>>) {
+    use std::time::Duration;
+
+    use tracing::debug;
+
     std::thread::Builder::new()
         .name("mb-frontmost".into())
         .spawn(move || {

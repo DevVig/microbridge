@@ -73,7 +73,13 @@ export function Popover({
   onQuit: () => void;
 }) {
   const t = dark ? DARK : LIGHT;
-  const connected = snapshot.device_connected;
+  const simulator = snapshot.device_name === "mock";
+  const connected = snapshot.device_connected || simulator;
+  const chipLabel = snapshot.device_connected
+    ? "Connected"
+    : simulator
+      ? "Simulator"
+      : "Disconnected";
   const focused = snapshot.sessions.find(
     (s) => s.id === snapshot.focused_session_id,
   );
@@ -140,7 +146,7 @@ export function Popover({
                 boxShadow: connected ? "0 0 5px #30C463" : "none",
               }}
             />
-            {connected ? "Connected" : "Disconnected"}
+            {chipLabel}
           </span>
         </div>
 
