@@ -11,7 +11,7 @@ Enforced via GitHub **rulesets** (Settings → Rules):
 | Direct pushes | Blocked (`non_fast_forward` + PR required) |
 | Force push / delete | Blocked |
 | Merge method | **Squash only** |
-| Status checks | `rust (ubuntu-latest)`, `rust (macos-latest)`, `ui` (strict) |
+| Status checks | `rust (ubuntu-latest)`, `rust (macos-latest)`, `ui` (strict); PR title lint is CI advisory |
 | Conversations | Must be resolved |
 | Approvals | 0 required (solo-friendly); stale reviews dismissed |
 | Admin bypass | Via pull request only |

@@ -1,7 +1,7 @@
 name: PR title
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, synchronize, reopened]
 
 permissions:
@@ -30,5 +30,7 @@ jobs:
             adapter
             revert
           requireScope: false
-          subjectPattern: .+
+          ignoreLabels: |
+            dependencies
+            dependabot
           wip: true
