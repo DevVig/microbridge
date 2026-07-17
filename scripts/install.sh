@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Unified Microbridge installer (daemon + optional UI).
+# Unified Microbridge installer — daemon + menu bar app (default).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
-WITH_UI=0
+WITH_UI=1
 WITH_LAUNCHD=1
 LABEL="ai.microbridge.daemon"
+UI_LABEL="ai.microbridge.ui"
 
 usage() {
   cat <<EOF
 Usage: ./scripts/install.sh [options]
 
-  --with-ui       Also set up apps/microbridge-ui (npm; Tauri build if available)
-  --no-launchd    Skip macOS launchd agent (Linux default behavior unless Darwin)
+  --no-ui         Skip the menu bar companion (daemon/CLI only)
+  --no-launchd    Skip macOS launchd agents
   --bin-dir DIR   Install binaries here (default: ~/.local/bin)
   -h, --help      Show this help
 EOF
@@ -21,7 +22,8 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-ui) WITH_UI=1; shift ;;
+    --no-ui) WITH_UI=0; shift ;;
+    --with-ui) WITH_UI=1; shift ;; # back-compat; UI is already default
     --no-launchd) WITH_LAUNCHD=0; shift ;;
     --bin-dir) BIN_DIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -128,25 +130,61 @@ else
 fi
 
 if [[ "$WITH_UI" -eq 1 ]]; then
-  echo "==> Companion UI"
+  echo "==> Menu bar app (primary UI)"
   need npm
   (
     cd "$ROOT/apps/microbridge-ui"
     npm ci
     npm run build
-    if command -v cargo >/dev/null && [[ -d src-tauri ]]; then
-      if npm run tauri build; then
-        echo "    Tauri app built under apps/microbridge-ui/src-tauri/target/release/bundle/"
+    if npm run tauri build; then
+      APP_SRC="$(find "$ROOT/apps/microbridge-ui/src-tauri/target/release/bundle" -name 'Microbridge.app' -type d 2>/dev/null | head -n1 || true)"
+      if [[ -n "$APP_SRC" && "$(uname -s)" == "Darwin" ]]; then
+        rm -rf "$HOME/Applications/Microbridge.app"
+        mkdir -p "$HOME/Applications"
+        cp -R "$APP_SRC" "$HOME/Applications/Microbridge.app"
+        echo "    installed ~/Applications/Microbridge.app"
+        if [[ "$WITH_LAUNCHD" -eq 1 ]]; then
+          UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
+          cat >"$UI_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${UI_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HOME}/Applications/Microbridge.app/Contents/MacOS/microbridge-ui</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>
+EOF
+          launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
+          launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
+          launchctl enable "gui/$(id -u)/${UI_LABEL}"
+          launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
+          echo "    menu bar app set to launch at login"
+        else
+          open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
+        fi
       else
-        echo "    note: Tauri bundle skipped/failed — web build is in apps/microbridge-ui/dist"
-        echo "    run: cd apps/microbridge-ui && npm run dev"
+        echo "    note: .app bundle not found — web build is in apps/microbridge-ui/dist"
+        echo "    run: cd apps/microbridge-ui && npm run tauri dev"
       fi
+    else
+      echo "    note: Tauri bundle failed — web build is in apps/microbridge-ui/dist"
+      echo "    run: cd apps/microbridge-ui && npm run tauri dev"
     fi
   )
 fi
 
 echo ""
 echo "Microbridge installed."
+echo "  UI:      ~/Applications/Microbridge.app (menu bar)"
 echo "  status:  $BIN_DIR/microbridgectl status"
 echo "  logs:    ~/.microbridge/daemon.log"
 echo "  config:  ~/.microbridge/config.toml"

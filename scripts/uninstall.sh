@@ -4,6 +4,7 @@ set -euo pipefail
 
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 LABEL="ai.microbridge.daemon"
+UI_LABEL="ai.microbridge.ui"
 PURGE=0
 
 usage() {
@@ -23,9 +24,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  echo "==> Stopping launchd agent"
+  echo "==> Stopping launchd agents"
   launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
   rm -f "$HOME/Library/LaunchAgents/${LABEL}.plist"
+  rm -f "$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
+  if [[ -d "$HOME/Applications/Microbridge.app" ]]; then
+    echo "==> Removing menu bar app"
+    rm -rf "$HOME/Applications/Microbridge.app"
+  fi
 fi
 
 if [[ -f "$HOME/.config/systemd/user/microbridge.service" ]]; then

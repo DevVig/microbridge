@@ -43,7 +43,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 1. **Invisible footprint.** Event-driven end to end: no polling loops, no heartbeat timers. Idle CPU is 0.0% and idle RSS targets single-digit megabytes. If Microbridge is noticeable in Activity Monitor, that is a bug — the [footprint budget](docs/architecture.md#footprint-budget) is a spec, not an aspiration.
 2. **Zero network.** No telemetry, no update pings, no cloud. The daemon's only I/O is a local Unix socket and the USB device. It links no HTTP client — auditable in `Cargo.lock`.
 3. **Rust core, any-language adapters.** The always-resident part is a single static Rust binary. First-party adapters compile into it (in-process, ~zero overhead). Community adapters are separate processes speaking [newline-delimited JSON](docs/protocol.md) — write one in whatever you like.
-4. **The UI is optional.** A menu bar companion shows connection status and opens Settings for key remapping; you can quit it and the daemon keeps working.
+4. **The menu bar app is the product UI.** Configure keys, lighting, and adapters there. The daemon keeps the hardware alive underneath; `microbridgectl` is a support/debug escape hatch.
 
 ## Architecture
 
@@ -61,7 +61,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 └──────────────────────┬───────────────────────────┘
                        │ same socket (status + commands)
              ┌─────────┴─────────┐
-             │ menu bar app       │  optional, quit-able (Tauri)
+             │ menu bar app       │  primary UI (Tauri)
              └───────────────────┘
 ```
 
@@ -74,8 +74,8 @@ crates/mb-protocol     wire types (serde) — the protocol's source of truth
 crates/mb-device       device abstraction; mock today, HID packing TBD
 crates/mb-adapters     first-party Codex CLI + Claude Code watchers
 crates/microbridged    the daemon: socket server, registry, focus, key source
-crates/microbridgectl  inspect a live bus (`status`)
-apps/microbridge-ui    optional Tauri companion (MagicPath-faithful)
+crates/microbridgectl  support/debug CLI (`status`)
+apps/microbridge-ui    menu bar app — primary UI (MagicPath-faithful)
 adapters/              out-of-process community adapters + reference impl
 docs/                  protocol, architecture, adapter guide, design, HID notes
 ```

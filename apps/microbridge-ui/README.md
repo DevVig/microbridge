@@ -1,7 +1,8 @@
 # microbridge-ui
 
-Optional Tauri 2 companion for Microbridge. **Status + setup only** — agent
-actions stay on the physical Codex Micro.
+Primary Microbridge UI (Tauri 2 menu bar app). **Status + setup** for the
+keyboard — agent actions (approve / reject / interrupt) stay on the physical
+Codex Micro.
 
 MagicPath mockups remain the visual go-to:
 

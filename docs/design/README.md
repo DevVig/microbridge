@@ -1,8 +1,8 @@
 # UI design
 
-The interface direction for Microbridge's optional UI surfaces. **MagicPath
-interactive mockups are the go-to reference** for M3 implementation; this
-document describes what they show and why.
+The menu bar app is the **primary** way people deal with the keyboard.
+**MagicPath interactive mockups are the go-to reference**; this document
+describes what they show and why.
 
 ## Lean companion principle
 
@@ -138,10 +138,17 @@ Keyboard setup. Four sections in a left rail:
 
 ### 3. Focus HUD — [interactive mockup](https://api.magicpath.ai/v1/sunnily-shadow-8075)
 
-A transient, **non-interactive** frosted overlay confirming deck ownership
-when focus changes: app badge, app name, thread title, state chip, a
-six-key echo of miniature frosted caps with the focused key lit,
-press-behavior hint, and a 2px drain bar (~2.5s). No buttons on the HUD card.
+A transient, **non-interactive** frosted overlay confirming **deck focus** —
+which single thread currently owns Approve / Reject / dial / command keys.
+
+**When it appears (you don’t open it):** whenever the daemon’s focused
+session changes, for about 2.5 seconds — for example after you press an
+Agent Key, an approval preempts another thread, or auto-follow moves the
+deck to another app. It is a glanceable confirmation, not a settings
+screen. No buttons on the HUD card.
+
+Contents: app badge, app name, thread title, state chip, a six-key echo
+with the focused key lit, press-behavior hint, and a 2px drain bar.
 
 ## Interaction rules
 
@@ -157,8 +164,8 @@ press-behavior hint, and a 2px drain bar (~2.5s). No buttons on the HUD card.
 - **Approvals are privileged on the deck**, not in the popover. An
   `awaiting_approval` thread may temporarily claim the approve/reject keys
   (user-toggleable in Settings → Agent Keys).
-- The UI processes are optional; quitting them changes nothing about the
-  daemon's behavior.
+- Quitting the menu bar app does not stop the daemon or LEDs; you lose
+  status/setup chrome until you reopen it.
 
 ## Assets
 
