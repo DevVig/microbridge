@@ -52,7 +52,7 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 
 | Piece | Need |
 |---|---|
-| macOS (Homebrew) | Homebrew; Xcode CLT; Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
+| macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
 | From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
 | Hardware LEDs | Codex Micro over USB (HID packing still landing — mock works without hardware) |
 

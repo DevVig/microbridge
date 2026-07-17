@@ -44,8 +44,15 @@ class Microbridge < Formula
     apps = Pathname.new(Dir.home)/"Applications"
     apps.mkpath
     dest = apps/"Microbridge.app"
+    # Only replace if missing or previously installed by this formula.
+    marker = dest/".microbridge-brew"
+    if dest.exist? && !marker.exist?
+      ohai "Leaving existing ~/Applications/Microbridge.app in place (not brew-managed)"
+      return
+    end
     rm_r dest if dest.exist?
     cp_r prefix/"Microbridge.app", dest
+    marker.write "owned-by-homebrew\n"
   end
 
   service do

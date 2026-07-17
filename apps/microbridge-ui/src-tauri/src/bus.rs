@@ -19,17 +19,23 @@ pub struct BusHandle {
 
 impl BusHandle {
     pub async fn set_config(&self, config: DaemonConfig) -> Result<DaemonConfig, String> {
-        let (mut write, mut reader) = open_ui_client().await?;
-        write_msg(
-            &mut write,
-            &ClientMessage::SetConfig {
-                config: config.clone(),
-            },
-        )
-        .await?;
-        match read_matching(&mut reader, false, true).await? {
-            ServerMessage::Config { config } => Ok(config),
-            _ => Err("unexpected set_config reply".into()),
+        let work = async {
+            let (mut write, mut reader) = open_ui_client().await?;
+            write_msg(
+                &mut write,
+                &ClientMessage::SetConfig {
+                    config: config.clone(),
+                },
+            )
+            .await?;
+            match read_matching(&mut reader, false, true).await? {
+                ServerMessage::Config { config } => Ok(config),
+                _ => Err("unexpected set_config reply".into()),
+            }
+        };
+        match tokio::time::timeout(Duration::from_secs(3), work).await {
+            Ok(result) => result,
+            Err(_) => Err("set_config timed out waiting for microbridged".into()),
         }
     }
 }

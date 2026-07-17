@@ -109,11 +109,18 @@ EOF
     tar -xzf "$TMP/$UI_ASSET" -C "$TMP"
     APP_SRC="$(find "$TMP" -name 'Microbridge.app' -type d | head -n1 || true)"
     if [[ -n "$APP_SRC" ]]; then
-      rm -rf "$HOME/Applications/Microbridge.app"
-      mkdir -p "$HOME/Applications"
-      cp -R "$APP_SRC" "$HOME/Applications/Microbridge.app"
-      UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
-      cat >"$UI_PLIST" <<EOF
+      DEST="$HOME/Applications/Microbridge.app"
+      MARKER="$DEST/.microbridge-release"
+      if [[ -d "$DEST" && ! -f "$MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
+        echo "    warning: $DEST exists and is not release-managed — leave it"
+        echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
+      else
+        rm -rf "$DEST"
+        mkdir -p "$HOME/Applications"
+        cp -R "$APP_SRC" "$DEST"
+        echo "owned-by-release" >"$MARKER"
+        UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
+        cat >"$UI_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -131,11 +138,12 @@ EOF
 </dict>
 </plist>
 EOF
-      launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
-      launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
-      launchctl enable "gui/$(id -u)/${UI_LABEL}"
-      launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
-      echo "    installed ~/Applications/Microbridge.app"
+        launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
+        launchctl enable "gui/$(id -u)/${UI_LABEL}"
+        launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
+        echo "    installed ~/Applications/Microbridge.app"
+      fi
     else
       echo "    warning: archive had no Microbridge.app"
     fi

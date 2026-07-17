@@ -68,7 +68,7 @@ jobs:
         run: |
           APP="$(find apps/microbridge-ui/src-tauri/target/release/bundle/macos -name 'Microbridge.app' -type d | head -n1)"
           test -n "$APP"
-          STAGE="microbridge-ui-${{ github.ref_name }}-macos"
+          STAGE="microbridge-ui-${GITHUB_REF_NAME}-macos"
           mkdir -p "staging/${STAGE}"
           cp -R "$APP" "staging/${STAGE}/"
           cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"

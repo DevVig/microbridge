@@ -31,7 +31,7 @@ fn spawn_macos_watcher(tx: mpsc::UnboundedSender<Option<String>>) {
         .spawn(move || {
             let mut last: Option<String> = None;
             loop {
-                let next = frontmost_app_name();
+                let next = objc2::rc::autoreleasepool(|_| frontmost_app_name());
                 if next != last {
                     debug!(?next, "frontmost app changed");
                     last = next.clone();

@@ -3,6 +3,7 @@
 
 mod bus;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,9 +37,16 @@ fn position_below_tray(window: &WebviewWindow, tray_x: f64, tray_y: f64, tray_w:
         return;
     };
     let width = f64::from(size.width);
-    let x = (tray_x + tray_w / 2.0 - width / 2.0).round() as i32;
+    let mut x = tray_x + tray_w / 2.0 - width / 2.0;
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let origin = monitor.position();
+        let screen = monitor.size();
+        let min_x = f64::from(origin.x);
+        let max_x = min_x + f64::from(screen.width) - width;
+        x = x.clamp(min_x + 8.0, max_x - 8.0);
+    }
     let y = (tray_y + tray_h + 6.0).round() as i32;
-    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
+    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x.round() as i32, y)));
 }
 
 fn toggle_popover(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
@@ -54,7 +62,7 @@ fn toggle_popover(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h
     let _ = window.set_focus();
 }
 
-fn show_hud(app: &AppHandle) {
+fn show_hud(app: &AppHandle, generation: Arc<AtomicU64>) {
     let Some(window) = app.get_webview_window("hud") else {
         return;
     };
@@ -68,12 +76,15 @@ fn show_hud(app: &AppHandle) {
         let y = origin.y + (screen.height as f64 * 0.12).round() as i32;
         let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
     }
+    let token = generation.fetch_add(1, Ordering::Relaxed) + 1;
     let _ = window.show();
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(2500)).await;
-        if let Some(hud) = app2.get_webview_window("hud") {
-            let _ = hud.hide();
+        if generation.load(Ordering::Relaxed) == token {
+            if let Some(hud) = app2.get_webview_window("hud") {
+                let _ = hud.hide();
+            }
         }
     });
 }
@@ -150,7 +161,9 @@ pub fn run() {
 
             let (bus, mut event_rx) = spawn_bus_loop();
             let snapshot: CachedSnapshot = Arc::new(Mutex::new(None));
+            let hud_generation = Arc::new(AtomicU64::new(0));
             let snap_for_loop = Arc::clone(&snapshot);
+            let hud_gen_loop = Arc::clone(&hud_generation);
             let handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
@@ -187,7 +200,7 @@ pub fn run() {
                                 let _ = handle.emit("bus-snapshot", payload);
                                 drop(guard);
                                 if changed && last_focus.is_some() {
-                                    show_hud(&handle);
+                                    show_hud(&handle, Arc::clone(&hud_gen_loop));
                                 }
                             }
                         }
@@ -204,6 +217,7 @@ pub fn run() {
                 }
             });
 
+            let _ = hud_generation; // owned by the bus event loop
             app.manage(AppState { bus, snapshot });
 
             let icon = app
