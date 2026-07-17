@@ -84,12 +84,13 @@ docs/                  protocol, architecture, adapter guide, design, HID notes
 
 Full guide: **[INSTALL.md](INSTALL.md)**. Governance / branch rules: **[docs/governance.md](docs/governance.md)**.
 
-**macOS (recommended — Homebrew, with upgrades):**
+**macOS (recommended — Homebrew installs the menu bar app + daemon):**
 
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
 brew services start microbridge
+open ~/Applications/Microbridge.app
 # updates: brew update && brew upgrade microbridge
 # optional background updates: brew autoupdate start --upgrade --cleanup
 ```

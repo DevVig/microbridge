@@ -45,9 +45,43 @@ jobs:
           name: binaries-${{ matrix.target }}
           path: ${{ env.ASSET }}
 
+  build-ui-macos:
+    name: build menu bar app (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/microbridge-ui/src-tauri -> target"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/microbridge-ui/package-lock.json
+      - name: Build Microbridge.app
+        working-directory: apps/microbridge-ui
+        run: |
+          npm ci
+          npm run tauri build -- --bundles app
+      - name: Package .app
+        run: |
+          APP="$(find apps/microbridge-ui/src-tauri/target/release/bundle/macos -name 'Microbridge.app' -type d | head -n1)"
+          test -n "$APP"
+          STAGE="microbridge-ui-${{ github.ref_name }}-macos"
+          mkdir -p "staging/${STAGE}"
+          cp -R "$APP" "staging/${STAGE}/"
+          cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
+          tar -C staging -czf "${STAGE}.tar.gz" "${STAGE}"
+          echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ui-macos
+          path: ${{ env.ASSET }}
+
   publish:
     name: publish release
-    needs: build
+    needs: [build, build-ui-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -66,15 +100,18 @@ jobs:
           body: |
             ## Install (macOS)
 
+            Menu bar app + daemon (not CLI-only):
+
             ```sh
             brew tap DevVig/microbridge https://github.com/DevVig/microbridge
             brew install microbridge
             brew services start microbridge
+            open ~/Applications/Microbridge.app
             ```
 
             Upgrade later: `brew update && brew upgrade microbridge`
 
-            Binary archive: `./scripts/install-from-release.sh ${{ github.ref_name }}`
+            Binary + app archive: `./scripts/install-from-release.sh ${{ github.ref_name }}`
 
             Full guide: [INSTALL.md](INSTALL.md).
 

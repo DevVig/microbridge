@@ -86,13 +86,33 @@ impl DaemonState {
 
     pub fn set_config(&mut self, config: DaemonConfig) {
         let prev_focus = self.registry.focused.clone();
-        self.config = config.clone();
+        // Preserve live frontmost unless the client explicitly cleared it.
+        let frontmost = config
+            .frontmost_app
+            .clone()
+            .or_else(|| self.config.frontmost_app.clone());
+        self.config = config;
+        self.config.frontmost_app = frontmost;
         if let Err(error) = save_config(&self.config) {
             warn!(%error, "failed to persist config");
         }
         self.registry.resolve_focus(&self.config);
         self.broadcast_ui(BusEvent::ConfigChanged {
-            config: config.clone(),
+            config: self.config.clone(),
+        });
+        self.after_bus_change(prev_focus);
+    }
+
+    /// Update the ephemeral frontmost app (not written to disk).
+    pub fn set_frontmost_app(&mut self, app: Option<String>) {
+        if self.config.frontmost_app == app {
+            return;
+        }
+        let prev_focus = self.registry.focused.clone();
+        self.config.frontmost_app = app;
+        self.registry.resolve_focus(&self.config);
+        self.broadcast_ui(BusEvent::ConfigChanged {
+            config: self.config.clone(),
         });
         self.after_bus_change(prev_focus);
     }

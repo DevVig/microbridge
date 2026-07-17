@@ -33,6 +33,20 @@ body,
   animation: mb-led-pulse 1.6s ease-in-out infinite;
 }
 
+@keyframes mb-led-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.mb-led-breathe {
+  animation: mb-led-breathe 2.4s ease-in-out infinite;
+}
+
 @keyframes mb-drain {
   from {
     transform: scaleX(1);

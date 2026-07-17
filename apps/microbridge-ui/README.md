@@ -1,18 +1,16 @@
 # microbridge-ui
 
-Primary Microbridge UI (Tauri 2 menu bar app). **Status + setup** for the
-keyboard — agent actions (approve / reject / interrupt) stay on the physical
-Codex Micro.
+Primary Microbridge UI — a **macOS menu bar app** (status + setup). Agent
+actions (approve / reject / interrupt) stay on the physical Codex Micro.
 
-MagicPath mockups remain the visual go-to:
+| Surface | Behavior |
+|---|---|
+| Menu bar icon | Template tray icon; click toggles the popover |
+| Popover | Connection, focus card, device echo, threads, Settings / Pause LEDs / Quit |
+| Settings | Keys (device twin) · Agent Keys · Adapters · Device |
+| Focus HUD | ~2.5s toast when deck focus changes |
 
-| Surface | MagicPath | App route |
-|---|---|---|
-| Menu bar popover | `safely-park-1411` | `?view=popover` (default) |
-| Settings | `cool-gulf-2537` | `?view=settings` |
-| Focus HUD | `sunnily-shadow-8075` | `?view=hud` |
-
-Vendored MagicPath exports (reference): [`vendor/magicpath/`](vendor/magicpath/).
+MagicPath mockups remain the visual go-to (`vendor/magicpath/`).
 
 ## Develop
 
@@ -20,18 +18,19 @@ Vendored MagicPath exports (reference): [`vendor/magicpath/`](vendor/magicpath/)
 # terminal 1 — daemon
 cargo run -p microbridged
 
-# terminal 2 — web UI (demo snapshot if daemon/Tauri unavailable)
-cd apps/microbridge-ui && npm install && npm run dev
-
-# or full Tauri shell (needs Xcode CLT)
-npm run tauri dev
+# terminal 2 — menu bar app
+cd apps/microbridge-ui && npm install && npm run tauri dev
 ```
+
+Browser-only (no tray): `npm run dev` — uses a demo snapshot if the daemon
+is unavailable.
 
 ## Build
 
 ```sh
 npm run build          # frontend only (CI)
-npm run tauri build    # macOS app bundle
+npm run tauri build    # Microbridge.app
 ```
 
-The UI connects as `role:ui` on the Microbridge Unix socket and never opens HID.
+The UI connects as `role:ui` on the Microbridge Unix socket, keeps a live
+subscribe, and never opens HID.

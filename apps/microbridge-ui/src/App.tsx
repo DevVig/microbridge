@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchSnapshot, setConfig } from "./lib/bus";
+import { useEffect, useState } from "react";
+import {
+  closeSettings,
+  openSettings,
+  quitUi,
+  setConfig,
+  subscribeSnapshot,
+} from "./lib/bus";
 import { resolveAppearance } from "./lib/theme";
 import type { DaemonConfig, Snapshot } from "./lib/types";
 import { Hud } from "./surfaces/Hud";
@@ -16,39 +22,23 @@ function initialView(): View {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>(initialView);
-  const [tab, setTab] = useState<SettingsTab>("agent");
+  const [view] = useState<View>(initialView);
+  const [tab, setTab] = useState<SettingsTab>("keys");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [hudFlash, setHudFlash] = useState(false);
-  const [prevFocus, setPrevFocus] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    const snap = await fetchSnapshot();
-    setSnapshot((prev) => {
-      if (
-        prev &&
-        snap.focused_session_id &&
-        snap.focused_session_id !== prev.focused_session_id
-      ) {
-        setHudFlash(true);
-        window.setTimeout(() => setHudFlash(false), 2600);
-      }
-      return snap;
+  useEffect(() => {
+    let active = true;
+    let unsub: (() => void) | undefined;
+    void subscribeSnapshot((snap) => {
+      if (active) setSnapshot(snap);
+    }).then((u) => {
+      unsub = u;
     });
-    setPrevFocus(snap.focused_session_id);
+    return () => {
+      active = false;
+      unsub?.();
+    };
   }, []);
-
-  useEffect(() => {
-    void refresh();
-    // UI polls only as a fallback when Tauri events are unavailable.
-    // In Tauri, replace with listen("bus-event").
-    const id = window.setInterval(() => void refresh(), 2000);
-    return () => window.clearInterval(id);
-  }, [refresh]);
-
-  useEffect(() => {
-    void prevFocus;
-  }, [prevFocus]);
 
   if (!snapshot) {
     return (
@@ -59,6 +49,7 @@ export default function App() {
           placeItems: "center",
           fontFamily: "Inter, system-ui, sans-serif",
           color: "#6E6E73",
+          background: "transparent",
         }}
       >
         Connecting to microbridged…
@@ -66,15 +57,14 @@ export default function App() {
     );
   }
 
-  const dark =
-    resolveAppearance(snapshot.config.appearance) === "dark";
+  const dark = resolveAppearance(snapshot.config.appearance) === "dark";
 
   const applyConfig = async (config: DaemonConfig) => {
     const next = await setConfig(config);
     setSnapshot({ ...snapshot, config: next });
   };
 
-  if (view === "hud" || hudFlash) {
+  if (view === "hud") {
     return <Hud snapshot={snapshot} dark={dark} />;
   }
 
@@ -86,7 +76,7 @@ export default function App() {
         tab={tab}
         onTab={setTab}
         onConfig={(c) => void applyConfig(c)}
-        onClose={() => setView("popover")}
+        onClose={() => void closeSettings()}
       />
     );
   }
@@ -95,18 +85,14 @@ export default function App() {
     <Popover
       snapshot={snapshot}
       dark={dark}
-      onOpenSettings={() => setView("settings")}
+      onOpenSettings={() => void openSettings()}
       onTogglePause={() =>
         void applyConfig({
           ...snapshot.config,
           pause_leds: !snapshot.config.pause_leds,
         })
       }
-      onQuit={() => {
-        void import("@tauri-apps/api/core")
-          .then(({ invoke }) => invoke("quit_ui"))
-          .catch(() => window.close());
-      }}
+      onQuit={() => void quitUi()}
     />
   );
 }

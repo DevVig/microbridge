@@ -29,16 +29,13 @@ export function Hud({
 
   return (
     <div
-      className="relative flex h-full min-h-screen w-full flex-col items-center justify-center px-6"
+      className="relative flex h-full min-h-screen w-full flex-col items-center justify-center bg-transparent px-4"
       style={{
-        background: dark
-          ? "radial-gradient(ellipse 120% 90% at 50% 0%, #131315 0%, #08080A 100%)"
-          : "radial-gradient(ellipse 120% 90% at 50% 0%, #F1F1EF 0%, #E2E2DF 100%)",
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
       <div
-        className="mb-frost pointer-events-none relative flex w-[440px] max-w-[92vw] select-none flex-col overflow-hidden rounded-2xl"
+        className="mb-frost pointer-events-none relative flex w-full max-w-[340px] select-none flex-col overflow-hidden rounded-2xl"
         style={{
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,

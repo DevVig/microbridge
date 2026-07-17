@@ -9,6 +9,7 @@ use std::sync::Arc;
 use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, AdapterEvent};
 use mb_device::open_default_device;
 use microbridged::config::load_config;
+use microbridged::frontmost::spawn_frontmost_watcher;
 use microbridged::socket::serve;
 use microbridged::state::DaemonState;
 use tokio::sync::{mpsc, Mutex};
@@ -42,6 +43,16 @@ async fn main() -> std::io::Result<()> {
                 AdapterEvent::Upsert(session) => state.upsert_session(session, 0),
                 AdapterEvent::Remove(id) => state.remove_session(&id),
             }
+        }
+    });
+
+    let (frontmost_tx, mut frontmost_rx) = mpsc::unbounded_channel::<Option<String>>();
+    spawn_frontmost_watcher(frontmost_tx);
+    let bus_front = Arc::clone(&shared);
+    tokio::spawn(async move {
+        while let Some(app) = frontmost_rx.recv().await {
+            let mut state = bus_front.lock().await;
+            state.set_frontmost_app(app);
         }
     });
 

@@ -1,8 +1,18 @@
+import { useState } from "react";
 import type { DaemonConfig, Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS } from "../lib/types";
 import { DARK, LIGHT } from "../lib/theme";
+import {
+  controlInspector,
+  DeviceTwin,
+  type ControlId,
+} from "../components/DeviceTwin";
 
-const KEY_SOURCES: { id: DaemonConfig["key_source"]; label: string; hint: string }[] = [
+const KEY_SOURCES: {
+  id: DaemonConfig["key_source"];
+  label: string;
+  hint: string;
+}[] = [
   {
     id: "most_recent",
     label: "Most recent",
@@ -49,6 +59,11 @@ export function Settings({
 }) {
   const t = dark ? DARK : LIGHT;
   const cfg = snapshot.config;
+  const [selected, setSelected] = useState<ControlId | null>("ag1");
+  const inspector = selected
+    ? controlInspector(selected, snapshot)
+    : null;
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "keys", label: "Keys" },
     { id: "agent", label: "Agent Keys" },
@@ -93,11 +108,69 @@ export function Settings({
           className="mt-auto rounded-lg px-2.5 py-2 text-left text-[12px]"
           style={{ color: t.textSecondary }}
         >
-          Back to popover
+          Close
         </button>
       </aside>
 
       <main className="flex-1 overflow-auto p-6">
+        {tab === "keys" && (
+          <section className="flex flex-col gap-6 lg:flex-row">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[18px] font-semibold">Keys</h1>
+              <p
+                className="mt-1 text-[12.5px]"
+                style={{ color: t.textSecondary }}
+              >
+                Click a control on the twin to inspect it. Agent Keys show the
+                live thread; command bindings land with HID.
+              </p>
+              <div className="mt-5 flex justify-center lg:justify-start">
+                <DeviceTwin
+                  snapshot={snapshot}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
+              </div>
+            </div>
+            <div
+              className="w-full max-w-sm shrink-0 rounded-2xl p-4"
+              style={{
+                backgroundColor: t.panel,
+                border: `1px solid ${t.hairline}`,
+              }}
+            >
+              {inspector ? (
+                <>
+                  <h2 className="text-[14px] font-semibold">{inspector.title}</h2>
+                  <p
+                    className="mt-2 text-[12.5px] leading-relaxed"
+                    style={{ color: t.textSecondary }}
+                  >
+                    {inspector.body}
+                  </p>
+                  {inspector.agent && (
+                    <button
+                      type="button"
+                      className="mt-4 rounded-lg px-3 py-1.5 text-[12px] font-medium"
+                      style={{
+                        backgroundColor: t.hoverBg,
+                        color: t.text,
+                      }}
+                      onClick={() => onTab("agent")}
+                    >
+                      Open Agent Keys
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="text-[12.5px]" style={{ color: t.textMuted }}>
+                  Select a control on the twin
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
         {tab === "agent" && (
           <section>
             <h1 className="text-[18px] font-semibold">Agent Keys</h1>
@@ -114,7 +187,10 @@ export function Settings({
                   <div
                     key={i}
                     className="rounded-xl p-3"
-                    style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                    style={{
+                      backgroundColor: t.panel,
+                      border: `1px solid ${t.hairline}`,
+                    }}
                   >
                     <div className="text-[11px]" style={{ color: t.textMuted }}>
                       AG{i + 1}
@@ -122,7 +198,10 @@ export function Settings({
                     {s ? (
                       <>
                         <div className="mt-1 text-[12px] font-medium">{s.app}</div>
-                        <div className="truncate text-[11px]" style={{ color: t.textSecondary }}>
+                        <div
+                          className="truncate text-[11px]"
+                          style={{ color: t.textSecondary }}
+                        >
                           {s.title || s.id}
                         </div>
                         <span
@@ -136,7 +215,10 @@ export function Settings({
                         </span>
                       </>
                     ) : (
-                      <div className="mt-2 text-[12px]" style={{ color: t.textMuted }}>
+                      <div
+                        className="mt-2 text-[12px]"
+                        style={{ color: t.textMuted }}
+                      >
                         Unassigned
                       </div>
                     )}
@@ -161,9 +243,7 @@ export function Settings({
                     type="radio"
                     name="key_source"
                     checked={cfg.key_source === src.id}
-                    onChange={() =>
-                      onConfig({ ...cfg, key_source: src.id })
-                    }
+                    onChange={() => onConfig({ ...cfg, key_source: src.id })}
                     className="mt-1"
                   />
                   <span>
@@ -191,6 +271,15 @@ export function Settings({
               />
               Approvals interrupt focus
             </label>
+
+            {cfg.frontmost_app && (
+              <p
+                className="mt-3 text-[11px]"
+                style={{ color: t.textMuted }}
+              >
+                Frontmost app (live): {cfg.frontmost_app}
+              </p>
+            )}
           </section>
         )}
 
@@ -203,6 +292,9 @@ export function Settings({
             </p>
 
             <h2 className="mt-5 text-[13px] font-semibold">Appearance</h2>
+            <p className="mt-1 text-[11px]" style={{ color: t.textMuted }}>
+              One coherent look per mode — no toggle in the menu bar.
+            </p>
             <div className="mt-2 flex gap-2">
               {(["system", "light", "dark"] as const).map((a) => (
                 <button
@@ -227,17 +319,21 @@ export function Settings({
               <button
                 type="button"
                 className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
-                style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
-                onClick={() =>
-                  onConfig({ ...cfg, lighting_preset: "codex" })
-                }
+                style={{
+                  backgroundColor: t.panel,
+                  border: `1px solid ${t.hairline}`,
+                }}
+                onClick={() => onConfig({ ...cfg, lighting_preset: "codex" })}
               >
                 Codex defaults
               </button>
               <button
                 type="button"
                 className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
-                style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                style={{
+                  backgroundColor: t.panel,
+                  border: `1px solid ${t.hairline}`,
+                }}
                 onClick={() =>
                   onConfig({ ...cfg, lighting_preset: "phosphor" })
                 }
@@ -260,10 +356,24 @@ export function Settings({
               />
             </label>
 
+            <label className="mt-4 block text-[12.5px]">
+              Sleep after idle ({cfg.sleep_minutes} min)
+              <input
+                type="range"
+                min={1}
+                max={30}
+                value={cfg.sleep_minutes}
+                onChange={(e) =>
+                  onConfig({ ...cfg, sleep_minutes: Number(e.target.value) })
+                }
+                className="mt-1 block w-full max-w-sm"
+              />
+            </label>
+
             <p className="mt-6 text-[11px]" style={{ color: t.textMuted }}>
               Device: {snapshot.device_name}
               {snapshot.device_connected ? " · connected" : " · not connected"}
-              {" · "}sleep {cfg.sleep_minutes}m
+              {" · "}zero network
             </p>
           </section>
         )}
@@ -277,78 +387,56 @@ export function Settings({
             </p>
             <ul className="mt-4 space-y-2">
               {[
-                { name: "Codex CLI", kind: "Native", note: "watches ~/.codex/sessions" },
-                { name: "Claude Code", kind: "Native", note: "watches ~/.claude/projects" },
-                { name: "Cursor", kind: "Community", note: "scaffold — adapters/cursor" },
-                { name: "T3 Code", kind: "Community", note: "scaffold — adapters/t3code" },
+                {
+                  name: "Codex CLI",
+                  kind: "Native",
+                  note: "watches ~/.codex/sessions",
+                },
+                {
+                  name: "Claude Code",
+                  kind: "Native",
+                  note: "watches ~/.claude/projects",
+                },
+                {
+                  name: "Cursor",
+                  kind: "Community",
+                  note: "scaffold — adapters/cursor",
+                },
+                {
+                  name: "T3 Code",
+                  kind: "Community",
+                  note: "scaffold — adapters/t3code",
+                },
               ].map((a) => (
                 <li
                   key={a.name}
                   className="flex items-center justify-between rounded-xl px-3 py-2.5"
-                  style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                  style={{
+                    backgroundColor: t.panel,
+                    border: `1px solid ${t.hairline}`,
+                  }}
                 >
                   <div>
                     <div className="text-[12.5px] font-medium">{a.name}</div>
-                    <div className="text-[11px]" style={{ color: t.textSecondary }}>
+                    <div
+                      className="text-[11px]"
+                      style={{ color: t.textSecondary }}
+                    >
                       {a.note}
                     </div>
                   </div>
                   <span
                     className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{ backgroundColor: t.hoverBg, color: t.textSecondary }}
+                    style={{
+                      backgroundColor: t.hoverBg,
+                      color: t.textSecondary,
+                    }}
                   >
                     {a.kind}
                   </span>
                 </li>
               ))}
             </ul>
-          </section>
-        )}
-
-        {tab === "keys" && (
-          <section>
-            <h1 className="text-[18px] font-semibold">Keys</h1>
-            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Remap command keys, dial, and joystick in a later revision. Agent
-              Keys are thread-owned — configure them under Agent Keys.
-            </p>
-            <div
-              className="mt-6 max-w-md rounded-2xl p-6"
-              style={{
-                backgroundColor: "#F7F7F5",
-                border: "1px solid rgba(0,0,0,0.08)",
-                color: "#0D0D0D",
-              }}
-            >
-              <p className="text-[12px] font-medium">Device twin</p>
-              <p className="mt-1 text-[11px]" style={{ color: "#6E6E73" }}>
-                Photo-accurate twin from MagicPath (
-                <code>cool-gulf-2537</code>) — live LED echo uses bus state
-                below.
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {snapshot.agent_key_session_ids.map((id, i) => {
-                  const s = id
-                    ? snapshot.sessions.find((x) => x.id === id)
-                    : null;
-                  const c = s ? STATE_COLORS[s.state] : "#E9E9E6";
-                  return (
-                    <div
-                      key={i}
-                      className="flex h-12 items-center justify-center rounded-lg text-[11px] font-medium"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.85), rgba(230,230,226,0.9))",
-                        boxShadow: s ? `inset 0 0 12px ${c}88` : "none",
-                        border: "1px solid rgba(0,0,0,0.1)",
-                      }}
-                    >
-                      AG{i + 1}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           </section>
         )}
       </main>

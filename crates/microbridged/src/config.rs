@@ -49,15 +49,20 @@ pub fn load_config_from(path: &Path) -> DaemonConfig {
 }
 
 /// Write config on change only (caller compares). Event-driven — no timers.
+/// `frontmost_app` is runtime-only and is cleared before persist.
 pub fn save_config(config: &DaemonConfig) -> std::io::Result<()> {
-    save_config_to(&config_path(), config)
+    let mut to_save = config.clone();
+    to_save.frontmost_app = None;
+    save_config_to(&config_path(), &to_save)
 }
 
 pub fn save_config_to(path: &Path, config: &DaemonConfig) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = toml::to_string_pretty(config)
+    let mut to_save = config.clone();
+    to_save.frontmost_app = None;
+    let text = toml::to_string_pretty(&to_save)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, text)?;
     info!(path = %path.display(), "saved config");

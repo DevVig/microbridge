@@ -10,14 +10,48 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "popover",
         "title": "Microbridge",
-        "width": 400,
-        "height": 560,
+        "url": "index.html?view=popover",
+        "width": 380,
+        "height": 540,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "fullscreen": false,
+        "focus": false
+      },
+      {
+        "label": "settings",
+        "title": "Microbridge Settings",
+        "url": "index.html?view=settings",
+        "width": 960,
+        "height": 680,
         "resizable": true,
         "decorations": true,
-        "transparent": false
+        "transparent": false,
+        "visible": false,
+        "skipTaskbar": false
+      },
+      {
+        "label": "hud",
+        "title": "Microbridge Focus",
+        "url": "index.html?view=hud",
+        "width": 360,
+        "height": 120,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "focus": false
       }
     ],
     "security": {
@@ -29,6 +63,9 @@
     "targets": "all",
     "icon": [
       "icons/icon.png"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
   }
 }

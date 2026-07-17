@@ -39,11 +39,14 @@ on merge, auto-merge enabled.
 ## macOS install + auto-update (Homebrew)
 
 **This is the supported consumer path** — not cloning the git repo.
+`brew install microbridge` builds/installs the **menu bar app** and the
+daemon (not CLI-only).
 
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
 brew services start microbridge
+open ~/Applications/Microbridge.app
 ```
 
 Updates:
@@ -51,6 +54,7 @@ Updates:
 ```sh
 brew update && brew upgrade microbridge
 brew services restart microbridge   # if the formula changed
+open ~/Applications/Microbridge.app # refreshed on upgrade via post_install
 ```
 
 Optional background updates (Homebrew’s own updater):
