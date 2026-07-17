@@ -53,11 +53,17 @@ Assets are attached to the GitHub Release; users can run
 
 ## Commits and PRs
 
-- Conventional commits (`feat:`, `fix:`, `docs:`, `adapter:` for adapter
-  work).
+`main` is protected — **no direct pushes**. Open a PR; squash-merge only.
+
+- PR titles must be Conventional Commits (`feat:`, `fix:`, `docs:`,
+  `adapter:`, …) — enforced by CI (`PR title` workflow).
+- Required checks: `rust (ubuntu-latest)`, `rust (macos-latest)`, `ui`.
+- Resolve review threads before merge.
 - One logical change per PR; small PRs merge fast here.
 - PRs must say how they were tested — "ran the reference adapter against the
   daemon and watched the frames" is a fine answer at this stage.
+
+See [docs/governance.md](docs/governance.md).
 
 ## Reporting security issues
 

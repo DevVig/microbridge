@@ -1,0 +1,8 @@
+# Default owners for review routing (optional reviews; PRs still required on main).
+*       @DevVig
+
+/crates/                 @DevVig
+/apps/microbridge-ui/    @DevVig
+/adapters/               @DevVig
+/Formula/                @DevVig
+/.github/                @DevVig
