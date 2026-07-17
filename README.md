@@ -6,6 +6,30 @@ Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, 
 
 > **Status: early alpha.** Protocol v0 with UI/control, in-process Codex/Claude watchers, mock device, `microbridgectl`, and a Tauri companion shell. Real HID packing waits on device captures — see [ROADMAP.md](ROADMAP.md).
 
+## Screenshots
+
+Optional companion UI — status and setup only. Agent actions stay on the Micro.
+
+<p align="center">
+  <img src="docs/screenshots/menu-bar-popover.png" alt="Microbridge menu bar popover" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="Microbridge Settings with device twin" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/focus-hud.png" alt="Microbridge focus HUD" width="720" />
+</p>
+
+| Surface | File |
+|---|---|
+| Menu bar popover | [`docs/screenshots/menu-bar-popover.png`](docs/screenshots/menu-bar-popover.png) |
+| Settings (device twin) | [`docs/screenshots/settings.png`](docs/screenshots/settings.png) |
+| Focus HUD | [`docs/screenshots/focus-hud.png`](docs/screenshots/focus-hud.png) |
+
+Design spec: [docs/design/README.md](docs/design/README.md).
+
 ## Why
 
 The Micro's best feature — bidirectional Agent Keys — currently works through exactly one vendor's desktop app. Most of us run agents in more than one place. Microbridge turns the deck into a shared, neutral surface:

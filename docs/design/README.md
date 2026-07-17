@@ -177,3 +177,6 @@ When mockups and this doc differ, **trust the mockups**.
 The shipping companion lives in [`apps/microbridge-ui`](../../apps/microbridge-ui)
 (Tauri 2 + React). Vendored MagicPath exports for reference are under
 `apps/microbridge-ui/vendor/magicpath/`.
+
+Static screenshots for the README live in
+[`docs/screenshots/`](../screenshots/).
