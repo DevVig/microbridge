@@ -109,6 +109,7 @@ impl Device for MockDevice {
             agent_key_count: AGENT_KEY_COUNT,
             has_dial: true,
             has_joystick: true,
+            // Not a physical device — UI treats `device_name == "mock"` as simulator.
             connected: false,
         }
     }

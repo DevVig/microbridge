@@ -1,6 +1,6 @@
 import type { DaemonConfig, Snapshot } from "./types";
 
-/** Talks to microbridged via Tauri commands when available; demo snapshot otherwise. */
+/** Talks to microbridged via Tauri when available; demo snapshot in browser. */
 
 const DEMO: Snapshot = {
   sessions: [
@@ -28,7 +28,7 @@ const DEMO: Snapshot = {
   ],
   focused_session_id: "s1",
   agent_key_session_ids: ["s1", "s2", "s3", null, null, null],
-  device_connected: false,
+  device_connected: true,
   device_name: "mock",
   config: {
     key_source: "most_recent",
@@ -66,8 +66,35 @@ export async function setConfig(config: DaemonConfig): Promise<DaemonConfig> {
   return next ?? config;
 }
 
-export async function setFrontmostApp(app: string | null): Promise<void> {
-  await invoke("set_frontmost_app", { app });
+export async function openSettings(): Promise<void> {
+  await invoke("open_settings");
+}
+
+export async function closeSettings(): Promise<void> {
+  await invoke("close_settings");
+}
+
+export async function quitUi(): Promise<void> {
+  await invoke("quit_ui");
+}
+
+/** Subscribe to live bus snapshots. Returns an unsubscribe fn. */
+export async function subscribeSnapshot(
+  onSnapshot: (snapshot: Snapshot) => void,
+): Promise<() => void> {
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = await listen<Snapshot>("bus-snapshot", (event) => {
+      onSnapshot(event.payload);
+    });
+    const initial = await fetchSnapshot();
+    onSnapshot(initial);
+    return unlisten;
+  } catch {
+    onSnapshot(DEMO);
+    const id = window.setInterval(() => onSnapshot(DEMO), 2000);
+    return () => window.clearInterval(id);
+  }
 }
 
 export function isDemoSnapshot(snapshot: Snapshot): boolean {

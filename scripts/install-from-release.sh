@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Download a GitHub Release archive and install binaries (+ launchd on macOS).
+# Download a GitHub Release archive and install the menu bar app + daemon
+# (+ launchd on macOS). Not a CLI-only install.
 set -euo pipefail
 
 REPO="${MICROBRIDGE_REPO:-DevVig/microbridge}"
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 TAG="${1:-}"
 LABEL="ai.microbridge.daemon"
+UI_LABEL="ai.microbridge.ui"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -99,7 +101,58 @@ EOF
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl enable "gui/$(id -u)/${LABEL}"
   launchctl kickstart -k "gui/$(id -u)/${LABEL}"
+
+  UI_ASSET="microbridge-ui-${TAG}-macos.tar.gz"
+  UI_URL="https://github.com/${REPO}/releases/download/${TAG}/${UI_ASSET}"
+  echo "==> Downloading menu bar app $UI_URL"
+  if curl -fsSL -o "$TMP/$UI_ASSET" "$UI_URL"; then
+    tar -xzf "$TMP/$UI_ASSET" -C "$TMP"
+    APP_SRC="$(find "$TMP" -name 'Microbridge.app' -type d | head -n1 || true)"
+    if [[ -n "$APP_SRC" ]]; then
+      DEST="$HOME/Applications/Microbridge.app"
+      MARKER="$DEST/.microbridge-release"
+      if [[ -d "$DEST" && ! -f "$MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
+        echo "    warning: $DEST exists and is not release-managed — leave it"
+        echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
+      else
+        rm -rf "$DEST"
+        mkdir -p "$HOME/Applications"
+        cp -R "$APP_SRC" "$DEST"
+        echo "owned-by-release" >"$MARKER"
+        UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
+        cat >"$UI_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${UI_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HOME}/Applications/Microbridge.app/Contents/MacOS/microbridge-ui</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>
+EOF
+        launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
+        launchctl enable "gui/$(id -u)/${UI_LABEL}"
+        launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
+        echo "    installed ~/Applications/Microbridge.app"
+      fi
+    else
+      echo "    warning: archive had no Microbridge.app"
+    fi
+  else
+    echo "    warning: no UI asset for ${TAG} — install UI with ./scripts/install.sh or brew"
+  fi
 fi
 
-echo "Installed ${TAG} → $BIN_DIR"
+echo "Installed ${TAG}"
+echo "  UI:     ~/Applications/Microbridge.app (macOS)"
+echo "  bins:   $BIN_DIR"
 echo "  status: microbridgectl status"

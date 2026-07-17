@@ -6,13 +6,15 @@ runs on your machine.
 
 ## Recommended on macOS: Homebrew (with updates)
 
-This is the easy path. You do **not** need to clone the repo. Homebrew owns
-install, upgrades, and the launchd service.
+This is the easy path. You do **not** need to clone the repo. Homebrew installs
+the **menu bar app** (primary UI) and the daemon, then owns upgrades and the
+daemon service. This is not a CLI-only product.
 
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
 brew services start microbridge
+open ~/Applications/Microbridge.app
 microbridgectl status
 ```
 
@@ -50,8 +52,8 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 
 | Piece | Need |
 |---|---|
-| Daemon (Homebrew) | Homebrew; Rust pulled in as a build dependency |
-| Full install (from source) | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
+| macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
+| From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
 | Hardware LEDs | Codex Micro over USB (HID packing still landing — mock works without hardware) |
 
 ## From source (developers)
@@ -91,8 +93,9 @@ When a `v*` tag is published, CI attaches platform archives:
 
 | Path | Purpose |
 |---|---|
+| `~/Applications/Microbridge.app` | Menu bar app (primary UI) |
 | `$(brew --prefix)/bin/microbridged` | Daemon (Homebrew) |
-| `~/.local/bin/microbridged` | Daemon (source install script) |
+| `~/.local/bin/microbridged` | Daemon (source / release install) |
 | `~/.microbridge/microbridged.sock` | Local NDJSON socket |
 | `~/.microbridge/config.toml` | Key source, lighting, appearance |
 | `~/.microbridge/daemon.log` | launchd / service logs |

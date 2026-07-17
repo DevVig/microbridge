@@ -182,8 +182,11 @@ When mockups and this doc differ, **trust the mockups**.
 ## Implementation
 
 The shipping companion lives in [`apps/microbridge-ui`](../../apps/microbridge-ui)
-(Tauri 2 + React). Vendored MagicPath exports for reference are under
-`apps/microbridge-ui/vendor/magicpath/`.
+(Tauri 2 + React): macOS **menu bar tray** → popover / settings / HUD windows,
+live bus subscribe, MagicPath-faithful device twin + echo. Vendored MagicPath
+exports for reference are under `apps/microbridge-ui/vendor/magicpath/`.
+
+Frontmost-app auto-follow is owned by `microbridged` (`NSWorkspace`), not the UI.
 
 Static screenshots for the README live in
 [`docs/screenshots/`](../screenshots/).

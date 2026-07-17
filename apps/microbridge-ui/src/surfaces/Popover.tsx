@@ -1,7 +1,7 @@
-import { useMemo } from "react";
 import type { Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS, elapsed } from "../lib/types";
 import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
+import { DeviceEcho } from "../components/DeviceEcho";
 
 const MicroGlyph = ({ color }: { color: string }) => (
   <svg
@@ -20,55 +20,42 @@ const MicroGlyph = ({ color }: { color: string }) => (
   </svg>
 );
 
-function MiniEcho({
+function StateChip({
+  state,
   t,
-  snapshot,
 }: {
+  state: Snapshot["sessions"][0]["state"];
   t: ThemeTokens;
-  snapshot: Snapshot;
 }) {
-  const keys = snapshot.agent_key_session_ids;
+  const c = STATE_COLORS[state];
+  const isIdle = state === "idle";
+  const pulse =
+    state === "awaiting_approval"
+      ? "mb-led-pulse"
+      : state === "thinking" || state === "working"
+        ? "mb-led-breathe"
+        : "";
   return (
-    <div
-      className="flex flex-col items-center gap-1.5 rounded-xl px-3 py-2.5"
-      style={{ backgroundColor: t.sunken }}
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px] font-medium"
+      style={{
+        backgroundColor: isIdle ? t.hoverBg : `${c}1F`,
+        color: isIdle
+          ? t.textSecondary
+          : state === "awaiting_approval" && t.name === "light"
+            ? "#8A6100"
+            : c,
+      }}
     >
-      <div className="grid grid-cols-3 gap-1.5">
-        {keys.map((id, i) => {
-          const session = id
-            ? snapshot.sessions.find((s) => s.id === id)
-            : null;
-          const color = session ? STATE_COLORS[session.state] : "transparent";
-          const focused = id === snapshot.focused_session_id;
-          return (
-            <span
-              key={i}
-              className="relative block h-[22px] w-[22px] rounded-[5px]"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.7), rgba(238,238,235,0.55))",
-                border: focused
-                  ? "1.5px solid #3D7EFF"
-                  : "1px solid rgba(0,0,0,0.12)",
-                boxShadow: session ? `0 0 6px ${color}66` : "none",
-              }}
-            >
-              {session && (
-                <span
-                  className="absolute inset-[2px] rounded-[3px]"
-                  style={{
-                    background: `radial-gradient(circle at 50% 55%, ${color}E6 0%, ${color}33 60%, transparent 85%)`,
-                  }}
-                />
-              )}
-            </span>
-          );
-        })}
-      </div>
-      <span className="text-[10px]" style={{ color: t.textMuted }}>
-        Device echo · read-only
-      </span>
-    </div>
+      <span
+        className={`h-[6px] w-[6px] rounded-full ${pulse}`}
+        style={{
+          backgroundColor: isIdle ? t.textMuted : c,
+          boxShadow: isIdle ? "none" : `0 0 5px ${c}`,
+        }}
+      />
+      {STATE_LABELS[state]}
+    </span>
   );
 }
 
@@ -86,7 +73,13 @@ export function Popover({
   onQuit: () => void;
 }) {
   const t = dark ? DARK : LIGHT;
-  const connected = snapshot.device_connected;
+  const simulator = snapshot.device_name === "mock";
+  const connected = snapshot.device_connected || simulator;
+  const chipLabel = snapshot.device_connected
+    ? "Connected"
+    : simulator
+      ? "Simulator"
+      : "Disconnected";
   const focused = snapshot.sessions.find(
     (s) => s.id === snapshot.focused_session_id,
   );
@@ -105,26 +98,24 @@ export function Popover({
         color: active ? t.text : t.textSecondary,
         backgroundColor: active ? t.hoverBg : "transparent",
       }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.backgroundColor = t.hoverBg;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = active ? t.hoverBg : "transparent";
+      }}
     >
       {label}
     </button>
   );
 
-  const frame = useMemo(
-    () =>
-      dark
-        ? "radial-gradient(ellipse 120% 90% at 50% 0%, #131315 0%, #08080A 100%)"
-        : "radial-gradient(ellipse 120% 90% at 50% 0%, #F1F1EF 0%, #E2E2DF 100%)",
-    [dark],
-  );
-
   return (
     <div
-      className="flex min-h-screen w-full flex-col items-center transition-colors duration-200"
-      style={{ background: frame, fontFamily: "Inter, system-ui, sans-serif" }}
+      className="flex h-screen w-full items-start justify-center bg-transparent pt-1"
+      style={{ fontFamily: "Inter, system-ui, sans-serif" }}
     >
       <div
-        className="mb-frost mt-8 flex w-[360px] flex-col overflow-hidden rounded-2xl"
+        className="mb-frost flex w-[360px] flex-col overflow-hidden rounded-2xl"
         style={{
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,
@@ -133,7 +124,10 @@ export function Popover({
         }}
       >
         <div className="flex items-center gap-2 px-4 pb-3 pt-3.5">
-          <span className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: t.text }}>
+          <span
+            className="flex items-center gap-1.5 text-[13px] font-semibold"
+            style={{ color: t.text }}
+          >
             <MicroGlyph color={t.text} />
             Microbridge
           </span>
@@ -152,54 +146,67 @@ export function Popover({
                 boxShadow: connected ? "0 0 5px #30C463" : "none",
               }}
             />
-            {connected ? "Connected" : "Disconnected"}
+            {chipLabel}
           </span>
         </div>
 
-        {focused ? (
+        {connected ? (
           <>
             <div className="px-3 pb-3">
-              <div
-                className="rounded-xl px-3.5 py-3"
-                style={{ backgroundColor: t.sunken }}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="text-[11px] font-medium"
-                    style={{ color: t.textSecondary }}
-                  >
-                    {focused.app}
-                  </span>
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[10.5px] font-medium"
-                    style={{
-                      backgroundColor: `${STATE_COLORS[focused.state]}22`,
-                      color: STATE_COLORS[focused.state],
-                    }}
-                  >
-                    {STATE_LABELS[focused.state]}
-                  </span>
-                  <span
-                    className="ml-auto text-[10.5px] tabular-nums"
-                    style={{ color: t.textMuted }}
-                  >
-                    {elapsed(focused.updated_at_ms)}
-                  </span>
-                </div>
-                <p
-                  className="mt-1.5 text-[13px] font-semibold leading-snug"
-                  style={{ color: t.text }}
+              {focused ? (
+                <div
+                  className="rounded-xl p-3.5"
+                  style={{ backgroundColor: t.sunken }}
                 >
-                  {focused.title || focused.id}
-                </p>
-                <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-                  Press Agent Key to focus · double-press brings window forward
-                </p>
-              </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: t.textSecondary }}
+                    >
+                      {focused.app} · owns the deck
+                    </span>
+                    <StateChip state={focused.state} t={t} />
+                  </div>
+                  <p
+                    className="mt-1.5 truncate text-[14px] font-semibold"
+                    style={{ color: t.text }}
+                  >
+                    {focused.title || focused.id}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span
+                      className="text-[11px] tabular-nums"
+                      style={{ color: t.textMuted }}
+                    >
+                      {elapsed(focused.updated_at_ms)}
+                    </span>
+                    <span
+                      className="h-[3px] w-[3px] rounded-full"
+                      style={{ backgroundColor: t.textMuted }}
+                    />
+                    <span
+                      className="ml-auto text-[10px]"
+                      style={{ color: t.textMuted }}
+                    >
+                      press = switch · double-press = open
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="rounded-xl p-3.5 text-[12px]"
+                  style={{ backgroundColor: t.sunken, color: t.textSecondary }}
+                >
+                  No thread owns the deck yet. Start an agent session — Agent
+                  Keys light up when a thread goes live.
+                </div>
+              )}
             </div>
+
             <div className="flex justify-center px-3 pb-3">
-              <MiniEcho t={t} snapshot={snapshot} />
+              <DeviceEcho t={t} snapshot={snapshot} />
             </div>
+
             <div
               className="px-3 pb-2"
               style={{ borderTop: `1px solid ${t.hairline}` }}
@@ -218,40 +225,49 @@ export function Popover({
                   {liveCount} on keys
                 </span>
               </div>
-              {snapshot.sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+              {snapshot.sessions.length === 0 ? (
+                <p
+                  className="px-2 py-2 text-[12px]"
+                  style={{ color: t.textMuted }}
                 >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: STATE_COLORS[s.state] }}
-                  />
-                  <span
-                    className="w-[72px] truncate text-[11px]"
-                    style={{ color: t.textSecondary }}
+                  No live sessions
+                </p>
+              ) : (
+                snapshot.sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5"
                   >
-                    {s.app}
-                  </span>
-                  <span
-                    className="min-w-0 flex-1 truncate text-[12px]"
-                    style={{ color: t.text }}
-                  >
-                    {s.title || s.id}
-                  </span>
-                  <span
-                    className="text-[10.5px] tabular-nums"
-                    style={{ color: t.textMuted }}
-                  >
-                    {elapsed(s.updated_at_ms)}
-                  </span>
-                </div>
-              ))}
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: STATE_COLORS[s.state] }}
+                    />
+                    <span
+                      className="w-[72px] truncate text-[11px]"
+                      style={{ color: t.textSecondary }}
+                    >
+                      {s.app}
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 truncate text-[12px]"
+                      style={{ color: t.text }}
+                    >
+                      {s.title || s.id}
+                    </span>
+                    <span
+                      className="text-[10.5px] tabular-nums"
+                      style={{ color: t.textMuted }}
+                    >
+                      {elapsed(s.updated_at_ms)}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </>
         ) : (
           <div className="flex flex-col items-center px-6 pb-6 pt-2 text-center">
-            <MiniEcho t={t} snapshot={snapshot} />
+            <DeviceEcho t={t} snapshot={snapshot} />
             <p
               className="mt-4 text-[14px] font-semibold"
               style={{ color: t.text }}
@@ -262,8 +278,8 @@ export function Popover({
               className="mt-1 max-w-[240px] text-[12px] leading-relaxed"
               style={{ color: t.textSecondary }}
             >
-              Plug in over USB-C. Quit ChatGPT desktop if it owns the LEDs.
-              Agent Keys light up when a thread goes live.
+              Plug in over USB-C or pair over Bluetooth. Your Agent Keys light
+              up the moment a thread goes live.
             </p>
           </div>
         )}

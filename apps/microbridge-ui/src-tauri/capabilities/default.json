@@ -1,7 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for the Microbridge companion",
-  "windows": ["main"],
-  "permissions": ["core:default", "shell:allow-open"]
+  "description": "Default capabilities for the Microbridge menu bar companion",
+  "windows": ["popover", "settings", "hud"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-close",
+    "core:app:allow-default-window-icon",
+    "shell:allow-open"
+  ]
 }
