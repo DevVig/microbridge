@@ -4,7 +4,7 @@
 
 Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; the keys drive agent actions (approve, reject, interrupt, switch focus). No vendor desktop app required.
 
-> **Status: pre-alpha.** Protocol v0 and the daemon skeleton. Nothing drives real hardware yet — see [ROADMAP.md](ROADMAP.md).
+> **Status: early alpha.** Protocol v0 with UI/control, in-process Codex/Claude watchers, mock device, `microbridgectl`, and a Tauri companion shell. Real HID packing waits on device captures — see [ROADMAP.md](ROADMAP.md).
 
 ## Why
 
@@ -19,7 +19,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 1. **Invisible footprint.** Event-driven end to end: no polling loops, no heartbeat timers. Idle CPU is 0.0% and idle RSS targets single-digit megabytes. If Microbridge is noticeable in Activity Monitor, that is a bug — the [footprint budget](docs/architecture.md#footprint-budget) is a spec, not an aspiration.
 2. **Zero network.** No telemetry, no update pings, no cloud. The daemon's only I/O is a local Unix socket and the USB device. It links no HTTP client — auditable in `Cargo.lock`.
 3. **Rust core, any-language adapters.** The always-resident part is a single static Rust binary. First-party adapters compile into it (in-process, ~zero overhead). Community adapters are separate processes speaking [newline-delimited JSON](docs/protocol.md) — write one in whatever you like.
-4. **The UI is optional.** A menu bar companion app provides status and key remapping, and you can quit it; the daemon keeps working without it.
+4. **The UI is optional.** A menu bar companion shows connection status and opens Settings for key remapping; you can quit it and the daemon keeps working.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 └──────────────────────┬───────────────────────────┘
                        │ same socket (status + commands)
              ┌─────────┴─────────┐
-             │ menu bar app       │  optional, quit-able
+             │ menu bar app       │  optional, quit-able (Tauri)
              └───────────────────┘
 ```
 
@@ -46,23 +46,51 @@ Details in [docs/architecture.md](docs/architecture.md). The wire format is spec
 ## Repository layout
 
 ```
-crates/mb-protocol    wire types (serde) — the protocol's source of truth
-crates/mb-device      device abstraction; mock today, HID in M2
-crates/microbridged   the daemon: socket server, registry, focus policy
-adapters/             out-of-process community adapters + reference impl
-docs/                 protocol spec, architecture, adapter guide, design
+crates/mb-protocol     wire types (serde) — the protocol's source of truth
+crates/mb-device       device abstraction; mock today, HID packing TBD
+crates/mb-adapters     first-party Codex CLI + Claude Code watchers
+crates/microbridged    the daemon: socket server, registry, focus, key source
+crates/microbridgectl  inspect a live bus (`status`)
+apps/microbridge-ui    optional Tauri companion (MagicPath-faithful)
+adapters/              out-of-process community adapters + reference impl
+docs/                  protocol, architecture, adapter guide, design, HID notes
 ```
 
-## Building
+## Install
+
+Full guide: **[INSTALL.md](INSTALL.md)**.
 
 ```sh
-cargo test          # protocol round-trips + focus policy
+git clone https://github.com/DevVig/microbridge.git
+cd microbridge
+./scripts/install.sh              # macOS: binaries + launchd
+# ./scripts/install.sh --with-ui  # also build companion UI
+# ./scripts/install-linux-systemd.sh   # Linux systemd --user
+microbridgectl status
+```
+
+Uninstall: `./scripts/uninstall.sh` (add `--purge` to remove `~/.microbridge`).
+
+From a GitHub Release (after a `v*` tag): `./scripts/install-from-release.sh`.
+
+## Building (dev)
+
+```sh
+cargo test          # protocol, focus, key-source, adapters
 cargo run -p microbridged
 # in another shell:
+cargo run -p microbridgectl -- status
 node adapters/reference-echo/index.mjs   # walks a fake session through the states
 ```
 
-Requires stable Rust (see `rust-toolchain.toml`) and, for the reference adapter only, Node ≥ 20. macOS and Linux today; Windows (named pipes) is on the roadmap.
+Companion UI:
+
+```sh
+cd apps/microbridge-ui && npm install && npm run dev
+# or: make ui
+```
+
+Requires stable Rust (see `rust-toolchain.toml`) and, for Node adapters / UI, Node ≥ 20. macOS and Linux today; Windows (named pipes) is on the roadmap.
 
 ## Contributing
 

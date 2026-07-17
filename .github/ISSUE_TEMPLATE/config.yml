@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Adapter guide
+    url: https://github.com/DevVig/microbridge/blob/main/docs/adapters.md
+    about: How to write a community adapter before opening an issue
+  - name: Install help
+    url: https://github.com/DevVig/microbridge/blob/main/INSTALL.md
+    about: Installation, launchd, and uninstall steps

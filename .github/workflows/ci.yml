@@ -25,3 +25,19 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  ui:
+    name: ui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/microbridge-ui
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/microbridge-ui/package-lock.json
+      - run: npm ci
+      - run: npm run build

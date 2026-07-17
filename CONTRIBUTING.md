@@ -24,15 +24,32 @@ cargo run -p microbridged
 node adapters/reference-echo/index.mjs   # exercise the daemon end-to-end
 ```
 
+End-user install paths are documented in [INSTALL.md](INSTALL.md)
+(`./scripts/install.sh`, uninstall, releases).
+
 ## Before you push
 
 ```sh
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+# optional UI:
+cd apps/microbridge-ui && npm ci && npm run build
 ```
 
-CI enforces all three on macOS and Linux.
+Or `make ci`. CI enforces Rust checks on macOS/Linux and the UI build on Ubuntu.
+
+## Releases
+
+Push a version tag to publish binaries via GitHub Actions:
+
+```sh
+git tag v0.0.1
+git push origin v0.0.1
+```
+
+Assets are attached to the GitHub Release; users can run
+`./scripts/install-from-release.sh v0.0.1`.
 
 ## Commits and PRs
 

@@ -1,6 +1,6 @@
 # Microbridge protocol v0
 
-Normative spec for adapter ↔ daemon communication. The Rust types in
+Normative spec for adapter ↔ daemon ↔ UI communication. The Rust types in
 [`crates/mb-protocol`](../crates/mb-protocol/src/lib.rs) are the source of
 truth; if this document and the types disagree, fix one of them in the same PR.
 
@@ -10,9 +10,8 @@ truth; if this document and the types disagree, fix one of them in the same PR.
   `~/.microbridge/microbridged.sock`. (Windows named pipes: see ROADMAP M5.)
 - **Newline-delimited JSON** (NDJSON): one message per line, UTF-8, `\n`
   terminated. Blank lines are ignored.
-- One connection per adapter. The daemon treats a closed connection as the end
-  of that adapter's sessions only after `bye` — crash recovery is the
-  adapter's job on reconnect.
+- One connection per client. The daemon treats a closed adapter connection as
+  the end of that adapter's sessions. UI disconnects do not affect the bus.
 
 ## Principles
 
@@ -23,6 +22,17 @@ truth; if this document and the types disagree, fix one of them in the same PR.
   record; the daemon never merges partial updates.
 - **Adapters never touch the device.** They publish state and receive routed
   actions. The daemon's focus policy alone decides what the hardware shows.
+- **UI never talks to HID.** The companion mirrors daemon-resolved focus and
+  writes config only.
+
+## Client roles
+
+`hello` accepts an optional `role` (`adapter` default, or `ui`):
+
+```json
+{"type":"hello","adapter":"reference-echo","protocol_version":0}
+{"type":"hello","adapter":"microbridge-ui","protocol_version":0,"role":"ui"}
+```
 
 ## Messages: adapter → daemon
 
@@ -64,18 +74,66 @@ truth; if this document and the types disagree, fix one of them in the same PR.
 `action` is one of: `approve` · `reject` · `interrupt` · `new_session` ·
 `cycle_focus`. Adapters should treat unknown actions as a no-op and log them.
 
-## Focus policy (daemon-internal, v0)
+## Messages: UI → daemon
 
-1. A session in `awaiting_approval` preempts focus (most recent wins).
-2. Otherwise the currently focused session keeps the deck while it exists.
-3. Otherwise the most recently updated session takes focus.
+### `subscribe` — request a snapshot and subsequent events
 
-Frontmost-app auto-focus and pinning ship with the menu bar app (M3) and do
-not change the wire format.
+```json
+{"type":"subscribe"}
+```
+
+### `get_config` / `set_config`
+
+```json
+{"type":"get_config"}
+{"type":"set_config","config":{ /* DaemonConfig */ }}
+```
+
+Config fields include `key_source` (`most_recent` · `focused_app` · `pinned` ·
+`priority` · `custom`), `pinned_focus`, `approvals_interrupt`, `pause_leds`,
+`appearance`, `lighting_preset`, `state_colors`, `brightness`,
+`sleep_minutes`, `frontmost_app`, and key-assignment lists. Persisted at
+`~/.microbridge/config.toml`.
+
+## Messages: daemon → UI
+
+### `snapshot`
+
+Full bus view: sessions, focused session, six Agent Key assignments, device
+connection, and config.
+
+### `event`
+
+Incremental `BusEvent`: `session_upserted`, `session_removed`,
+`focus_changed`, `agent_keys_changed`, `device_changed`, `config_changed`.
+
+### `config`
+
+Response to `get_config` / ack of `set_config`.
+
+## Focus policy (daemon-internal)
+
+1. `pinned_focus` if that session still exists.
+2. A session in `awaiting_approval` preempts (when `approvals_interrupt`).
+3. Otherwise the currently focused session keeps the deck while it exists.
+4. Otherwise the frontmost app's most recent session (via `frontmost_app`).
+5. Otherwise the most recently updated session.
+
+## Key source (six Agent Keys)
+
+| Mode | Behavior |
+|---|---|
+| `most_recent` | Cross-app; six newest sessions (default) |
+| `focused_app` | Repopulate from the app that owns the deck |
+| `pinned` | First six `pinned_session_ids` |
+| `priority` | Approvals / active / app-priority ordering |
+| `custom` | Explicit `custom_key_ids` (empty string = unassigned) |
+
+Command keys always route to the single focused session.
 
 ## Versioning
 
 `protocol_version` is a single integer. The daemon accepts mismatched
-adapters but logs a warning; breaking wire changes bump the version and are
-called out in release notes. Additive fields are not breaking — adapters and
-daemon must ignore unknown fields.
+clients but logs a warning; breaking wire changes bump the version.
+Additive fields are not breaking — clients and daemon must ignore unknown
+fields. UI role + subscribe/config messages are additive in v0.

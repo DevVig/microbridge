@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template — prefer scripts/install-launchd.sh which fills absolute paths. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.microbridge.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/microbridged</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>

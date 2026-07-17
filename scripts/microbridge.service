@@ -1,0 +1,13 @@
+[Unit]
+Description=Microbridge daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/microbridged
+Restart=on-failure
+RestartSec=2
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target
