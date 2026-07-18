@@ -83,13 +83,18 @@ Sample unit: [`scripts/microbridge.service`](scripts/microbridge.service).
 ## Install from a GitHub Release (binaries)
 
 When a `v*` tag is published, CI attaches platform archives (daemon +
-arch-specific `Microbridge.app` for `aarch64-apple-darwin` /
-`x86_64-apple-darwin`):
+arch-specific menu bar app). On macOS, releases also include a
+**Developer ID–signed and notarized** DMG
+(`microbridge-ui-<tag>-<arch>.dmg`).
 
 ```sh
-./scripts/install-from-release.sh          # latest
+./scripts/install-from-release.sh          # latest (prefers DMG on macOS)
 ./scripts/install-from-release.sh v0.0.1
 ```
+
+Or open the DMG from the GitHub Release page and drag Microbridge into
+Applications, then install/start the daemon via Homebrew or the daemon
+archive.
 
 ## Layout after install
 
