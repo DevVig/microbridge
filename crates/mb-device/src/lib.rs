@@ -2,8 +2,31 @@
 //!
 //! Real Codex Micro HID support lands behind [`HidDevice`] (best-effort).
 //! Until a device is present the daemon drives [`MockDevice`], which logs the
-//! frames a real device would render. All reverse-engineering stays in this
-//! crate — see `docs/device-hid.md`.
+//! frames a real device would render. Protocol constants and packing live in
+//! this crate — see `docs/device-hid.md`.
+
+mod framing;
+mod ids;
+mod lighting;
+mod probe;
+mod rpc;
+
+#[cfg(feature = "hid")]
+mod capture;
+#[cfg(feature = "hid")]
+mod claim;
+
+#[cfg(feature = "hid")]
+pub use capture::run_capture;
+
+pub use framing::{frame_rpc, parse_report, CHANNEL_DEBUG, CHANNEL_RPC, REPORT_ID};
+pub use ids::{is_supported_pid, CODEX_MICRO_PID, WL_MANUFACTURERS, WL_USAGE_PAGE, WL_VID};
+pub use lighting::{parse_rgb_hex, threads_lighting_rpc};
+pub use probe::{match_usb_text, probe_usb_micro, ProbeResult};
+pub use rpc::{
+    parse_notify, threads_lighting_request, DeviceNotify, LightingEffect, METHOD_RGB_CONFIG,
+    METHOD_THREADS_LIGHTING,
+};
 
 use mb_protocol::{AgentState, AGENT_KEY_COUNT};
 
@@ -67,6 +90,8 @@ pub enum JoystickDir {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedFrame {
     pub keys: [Option<AgentState>; AGENT_KEY_COUNT],
+    /// Packed RGB (`0xRRGGBB`) per key when the daemon has resolved palette colors.
+    pub key_colors: [Option<u32>; AGENT_KEY_COUNT],
     pub focus_index: Option<usize>,
     pub brightness: u8,
     pub paused: bool,
@@ -76,6 +101,7 @@ impl Default for LedFrame {
     fn default() -> Self {
         Self {
             keys: [None; AGENT_KEY_COUNT],
+            key_colors: [None; AGENT_KEY_COUNT],
             focus_index: None,
             brightness: 80,
             paused: false,
@@ -131,13 +157,30 @@ impl Device for MockDevice {
 /// Best-effort USB HID driver for the Codex Micro.
 ///
 /// Without a probed device this behaves like [`MockDevice`] and reports
-/// `connected: false`. Real report packing is documented in
-/// `docs/device-hid.md` and filled in as the HID map is confirmed.
-#[derive(Debug)]
+/// `connected: false`. Presence (Detected) uses VID/PID from ChatGPT's kit.
+/// Live claim requires `--features hid` and `MICROBRIDGE_HID_CLAIM=1`.
 pub struct HidDevice {
     inner: MockDevice,
+    /// True only when the vendor HID interface is claimed for writes.
     connected: bool,
+    /// USB present (Detected) even if not claimed.
+    usb_present: bool,
     name: String,
+    product_id: Option<u16>,
+    rpc_seq: u32,
+    #[cfg(feature = "hid")]
+    claimed: Option<claim::ClaimedDevice>,
+}
+
+impl std::fmt::Debug for HidDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HidDevice")
+            .field("connected", &self.connected)
+            .field("usb_present", &self.usb_present)
+            .field("name", &self.name)
+            .field("product_id", &self.product_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for HidDevice {
@@ -145,7 +188,12 @@ impl Default for HidDevice {
         Self {
             inner: MockDevice::default(),
             connected: false,
+            usb_present: false,
             name: "codex-micro".into(),
+            product_id: None,
+            rpc_seq: 1,
+            #[cfg(feature = "hid")]
+            claimed: None,
         }
     }
 }
@@ -154,87 +202,85 @@ impl HidDevice {
     /// Attempt to open the first matching USB device. Falls back to
     /// disconnected (mock rendering) when none is found or HID is unavailable.
     ///
-    /// Until the report map is verified we never claim exclusive access. On
-    /// macOS we still probe USB presence so the UI can show "Detected".
+    /// Claim is opt-in (`MICROBRIDGE_HID_CLAIM=1` + `hid` feature) so we do not
+    /// fight ChatGPT Desktop by default.
     pub fn open() -> Self {
-        if usb_micro_present() {
-            Self {
-                inner: MockDevice::default(),
-                connected: false,
-                name: "codex-micro-usb".into(),
-            }
-        } else {
-            Self::default()
+        let probe = probe_usb_micro();
+        if !probe.present {
+            return Self::default();
         }
+
+        let pid = probe.product_id.unwrap_or(CODEX_MICRO_PID);
+        let name = format!("{}-usb", ids::product_name(pid));
+        let mut device = Self {
+            inner: MockDevice::default(),
+            connected: false,
+            usb_present: true,
+            name,
+            product_id: Some(pid),
+            rpc_seq: 1,
+            #[cfg(feature = "hid")]
+            claimed: None,
+        };
+
+        if claim_requested() {
+            device.try_claim();
+        }
+        device
     }
 
     pub fn set_connected_for_tests(&mut self, connected: bool) {
         self.connected = connected;
+        self.usb_present = connected || self.usb_present;
     }
-}
 
-/// Best-effort USB presence probe — does not claim the interface.
-fn usb_micro_present() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        match system_profiler_usb_text(std::time::Duration::from_secs(3)) {
-            Some(text) => usb_text_matches_micro(&text),
-            None => false,
+    pub fn usb_present(&self) -> bool {
+        self.usb_present
+    }
+
+    #[cfg(feature = "hid")]
+    fn try_claim(&mut self) {
+        match claim::open_device(self.product_id) {
+            Ok(claimed) => {
+                tracing::info!(
+                    product_id = format_args!("0x{:04X}", claimed.product_id),
+                    name = %claimed.name,
+                    "claimed Work Louder HID interface"
+                );
+                self.name = claimed.name.clone();
+                self.product_id = Some(claimed.product_id);
+                self.connected = true;
+                self.claimed = Some(claimed);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "HID claim requested but open failed; staying Detected-only");
+            }
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
+
+    #[cfg(not(feature = "hid"))]
+    fn try_claim(&mut self) {
+        tracing::warn!(
+            "MICROBRIDGE_HID_CLAIM set but mb-device built without `hid` feature — Detected only"
+        );
     }
-}
 
-#[cfg(target_os = "macos")]
-fn system_profiler_usb_text(timeout: std::time::Duration) -> Option<String> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::Instant;
-
-    let mut child = Command::new("system_profiler")
-        .args(["SPUSBDataType", "-detailLevel", "mini"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return None;
-                }
-                let mut buf = Vec::new();
-                if let Some(mut out) = child.stdout.take() {
-                    let _ = out.read_to_end(&mut buf);
-                }
-                return Some(String::from_utf8_lossy(&buf).into_owned());
-            }
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            Ok(None) => thread::sleep(std::time::Duration::from_millis(50)),
-            Err(_) => return None,
+    fn next_rpc_id(&mut self) -> u32 {
+        #[cfg(feature = "hid")]
+        if let Some(claimed) = self.claimed.as_mut() {
+            return claimed.next_rpc_id();
         }
+        let id = self.rpc_seq;
+        self.rpc_seq = (self.rpc_seq % 998) + 1;
+        id
     }
 }
 
-#[cfg(target_os = "macos")]
-fn usb_text_matches_micro(raw: &str) -> bool {
-    let text = raw.to_ascii_lowercase();
-    if text.contains("codex micro") {
-        return true;
-    }
-    // Require manufacturer + product token in the same USB record block.
-    text.split("\n\n").any(|block| {
-        block.contains("work louder") && (block.contains("codex") || block.contains("kbd-1.0"))
-    })
+fn claim_requested() -> bool {
+    matches!(
+        std::env::var("MICROBRIDGE_HID_CLAIM").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
 }
 
 impl Device for HidDevice {
@@ -249,21 +295,147 @@ impl Device for HidDevice {
     }
 
     fn set_leds(&mut self, frame: &LedFrame) {
+        let rpc_id = self.next_rpc_id();
+        let request = threads_lighting_rpc(frame, rpc_id);
+        let reports = frame_rpc(&request);
+
         if self.connected {
-            tracing::debug!(device = %self.name, keys = ?frame.keys, "hid led frame");
+            #[cfg(feature = "hid")]
+            if let Some(claimed) = self.claimed.as_ref() {
+                if let Err(error) = claimed.write_rpc(&request) {
+                    tracing::warn!(%error, "failed to write thread lighting RPC");
+                } else {
+                    tracing::debug!(
+                        device = %self.name,
+                        bytes = request.len(),
+                        packets = reports.len(),
+                        "hid rpc v.oai.thstatus"
+                    );
+                }
+            }
+            #[cfg(not(feature = "hid"))]
+            {
+                let _ = reports;
+                tracing::debug!(device = %self.name, %request, "hid led rpc (no claim backend)");
+            }
+        } else if self.usb_present {
+            tracing::debug!(
+                device = %self.name,
+                packets = reports.len(),
+                request = %request,
+                "usb present; packed LED RPC (set MICROBRIDGE_HID_CLAIM=1 to write)"
+            );
         }
+
         self.inner.set_leds(frame);
     }
+
+    fn poll_input(&mut self) -> Option<DeviceInput> {
+        #[cfg(feature = "hid")]
+        if let Some(claimed) = self.claimed.as_mut() {
+            for notify in claimed.poll_notifies() {
+                if let Some(input) = notify_to_input(notify) {
+                    return Some(input);
+                }
+            }
+        }
+        None
+    }
+}
+
+#[cfg(feature = "hid")]
+fn notify_to_input(notify: DeviceNotify) -> Option<DeviceInput> {
+    match notify {
+        DeviceNotify::Hid { key, .. } => {
+            agent_key_index(&key).map(|index| DeviceInput::AgentKeyPress { index })
+        }
+        DeviceNotify::Joystick { angle, .. } => angle.and_then(joystick_from_angle),
+        DeviceNotify::Other { .. } => None,
+    }
+}
+
+fn agent_key_index(key: &str) -> Option<usize> {
+    // Firmware may use agent0..agent5, agent1..agent6, or bare digits — accept common forms.
+    let digits: String = key.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let n: usize = digits.parse().ok()?;
+    if (1..=AGENT_KEY_COUNT).contains(&n) {
+        Some(n - 1)
+    } else if n < AGENT_KEY_COUNT {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+fn joystick_from_angle(angle: i64) -> Option<DeviceInput> {
+    // Degrees → cardinal flick; exact firmware mapping validated on hardware.
+    let a = angle.rem_euclid(360);
+    let direction = match a {
+        45..=134 => JoystickDir::Right,
+        135..=224 => JoystickDir::Down,
+        225..=314 => JoystickDir::Left,
+        _ => JoystickDir::Up,
+    };
+    Some(DeviceInput::JoystickFlick { direction })
 }
 
 /// Prefer a claimed HID device; else a detected-but-unclaimed USB Micro;
 /// else the mock simulator.
 pub fn open_default_device() -> Box<dyn Device> {
     let hid = HidDevice::open();
-    let desc = hid.descriptor();
-    if desc.connected || desc.name == "codex-micro-usb" {
+    if hid.usb_present() || hid.descriptor().connected {
         Box::new(hid)
     } else {
         Box::new(MockDevice::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Characterization tests: these lock in the *current guessed* mapping so a
+    // regression is visible. The real `v.oai.hid` strings get confirmed with a
+    // physical unit via `microbridgectl hid-capture` — see
+    // docs/hardware-bringup.md. Update these alongside the real map.
+
+    #[test]
+    fn agent_key_index_prefers_one_based_forms() {
+        // ChatGPT ships `agent1..agent6`; treat 1..=6 as one-based (0..=5).
+        assert_eq!(agent_key_index("agent1"), Some(0));
+        assert_eq!(agent_key_index("agent6"), Some(5));
+        assert_eq!(agent_key_index("k3"), Some(2));
+    }
+
+    #[test]
+    fn agent_key_index_accepts_zero_based_zero() {
+        // A bare 0 can only mean the first key.
+        assert_eq!(agent_key_index("agent0"), Some(0));
+        assert_eq!(agent_key_index("0"), Some(0));
+    }
+
+    #[test]
+    fn agent_key_index_rejects_out_of_range_and_digitless() {
+        assert_eq!(agent_key_index("agent7"), None);
+        assert_eq!(agent_key_index("approve"), None);
+        assert_eq!(agent_key_index(""), None);
+    }
+
+    #[test]
+    fn joystick_angle_maps_to_cardinals() {
+        let dir = |a| match joystick_from_angle(a) {
+            Some(DeviceInput::JoystickFlick { direction }) => direction,
+            other => panic!("expected a flick, got {other:?}"),
+        };
+        assert_eq!(dir(0), JoystickDir::Up);
+        assert_eq!(dir(90), JoystickDir::Right);
+        assert_eq!(dir(180), JoystickDir::Down);
+        assert_eq!(dir(270), JoystickDir::Left);
+        // Wraps: 360 ≡ 0, and negatives normalize via rem_euclid.
+        assert_eq!(dir(360), JoystickDir::Up);
+        assert_eq!(dir(-90), JoystickDir::Left);
     }
 }

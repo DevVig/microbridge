@@ -14,9 +14,11 @@ Homebrew formula skeleton. UI/control protocol (`subscribe` / config) and
 five key-source modes.
 
 ## M2 — Real light out 🚧
-Codex Micro HID driver in `mb-device` (LED frames, key events, encoder),
-behind a capability-probed device descriptor. Mock remains the default until
-VID/PID + report map are captured — see [docs/device-hid.md](docs/device-hid.md).
+Codex Micro HID driver in `mb-device`: VID/PID + HID framing + `v.oai.thstatus`
+packing mined from ChatGPT Desktop's Work Louder kit. USB probe shows
+**Detected**; live writes are opt-in (`MICROBRIDGE_HID_CLAIM=1`). Hardware
+validation (key map, ownership UX) still pending — see
+[docs/device-hid.md](docs/device-hid.md).
 
 ## M3 — Focus + menu bar 🚧
 Tauri companion (`apps/microbridge-ui`) ports the approved MagicPath surfaces

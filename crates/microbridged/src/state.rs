@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use mb_device::{Device, LedFrame};
+use mb_device::{parse_rgb_hex, Device, LedFrame};
 use mb_protocol::{
-    Action, BusEvent, DaemonConfig, ServerMessage, SessionStatus, Snapshot, AGENT_KEY_COUNT,
+    Action, AgentState, BusEvent, DaemonConfig, ServerMessage, SessionStatus, Snapshot,
+    AGENT_KEY_COUNT,
 };
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
@@ -130,15 +131,18 @@ impl DaemonState {
     pub fn render_leds(&mut self, keys: &[Option<String>; AGENT_KEY_COUNT]) {
         let mut frame = LedFrame {
             keys: [None; AGENT_KEY_COUNT],
+            key_colors: [None; AGENT_KEY_COUNT],
             focus_index: None,
             brightness: self.config.brightness,
             paused: self.config.pause_leds,
         };
         for (i, id) in keys.iter().enumerate() {
-            frame.keys[i] = id
+            let state = id
                 .as_ref()
                 .and_then(|sid| self.registry.sessions.get(sid))
                 .map(|s| s.state);
+            frame.keys[i] = state;
+            frame.key_colors[i] = state.and_then(|s| color_for_state(&self.config, s));
             if id.as_ref() == self.registry.focused.as_ref() {
                 frame.focus_index = Some(i);
             }
@@ -205,4 +209,16 @@ impl DaemonState {
             let _ = tx.send(msg);
         }
     }
+}
+
+fn color_for_state(config: &DaemonConfig, state: AgentState) -> Option<u32> {
+    let hex = match state {
+        AgentState::Idle => &config.state_colors.idle,
+        AgentState::Thinking => &config.state_colors.thinking,
+        AgentState::Working => &config.state_colors.working,
+        AgentState::AwaitingApproval => &config.state_colors.awaiting_approval,
+        AgentState::Done => &config.state_colors.done,
+        AgentState::Error => &config.state_colors.error,
+    };
+    parse_rgb_hex(hex)
 }

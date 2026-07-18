@@ -34,16 +34,58 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "hid-capture" => run_hid_capture(args.next()),
         "help" | "-h" | "--help" => {
-            println!("Usage: microbridgectl [status]");
-            println!("  status   print the live bus snapshot as JSON (default)");
+            print_usage();
             ExitCode::SUCCESS
         }
         other => {
             eprintln!("unknown command: {other}");
-            eprintln!("Usage: microbridgectl [status]");
+            print_usage();
             ExitCode::FAILURE
         }
+    }
+}
+
+fn print_usage() {
+    println!("Usage: microbridgectl [status | hid-capture [seconds]]");
+    println!("  status                 print the live bus snapshot as JSON (default)");
+    println!("  hid-capture [seconds]  observe raw Codex Micro key/dial/joystick events");
+    println!("                         (default 120s; needs the `hid` feature + a device)");
+}
+
+/// Stream decoded device→host HID events for hardware bring-up.
+/// See docs/hardware-bringup.md.
+fn run_hid_capture(seconds_arg: Option<String>) -> ExitCode {
+    let seconds = seconds_arg.as_deref().map(|s| s.parse::<u64>()).transpose();
+    let seconds = match seconds {
+        Ok(value) => value.unwrap_or(120),
+        Err(_) => {
+            eprintln!(
+                "microbridgectl hid-capture: seconds must be a whole number (0 = until Ctrl-C)"
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    #[cfg(feature = "hid")]
+    {
+        match mb_device::run_capture(seconds) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("microbridgectl hid-capture: {error}");
+                eprintln!("no Codex Micro detected? plug it in, or quit the app that owns it.");
+                ExitCode::FAILURE
+            }
+        }
+    }
+    #[cfg(not(feature = "hid"))]
+    {
+        let _ = seconds;
+        eprintln!(
+            "hid-capture needs the `hid` feature: cargo run -p microbridgectl --features hid -- hid-capture"
+        );
+        ExitCode::FAILURE
     }
 }
 
