@@ -41,7 +41,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 ## Design principles
 
 1. **Invisible footprint.** Event-driven end to end: no polling loops, no heartbeat timers. Idle CPU is 0.0% and idle RSS targets single-digit megabytes. If Microbridge is noticeable in Activity Monitor, that is a bug — the [footprint budget](docs/architecture.md#footprint-budget) is a spec, not an aspiration.
-2. **Zero network.** No telemetry, no update pings, no cloud. The daemon's only I/O is a local Unix socket and the USB device. It links no HTTP client — auditable in `Cargo.lock`.
+2. **Zero-network daemon.** No telemetry, no cloud. The always-resident daemon's only I/O is a local Unix socket and the USB device — it links no HTTP client, auditable in `Cargo.lock`. The menu bar app doesn't phone home either, with one opt-in exception: an update check *you* trigger (or enable to run once at launch). No background polling, no automatic pings.
 3. **Rust core, any-language adapters.** The always-resident part is a single static Rust binary. First-party adapters compile into it (in-process, ~zero overhead). Community adapters are separate processes speaking [newline-delimited JSON](docs/protocol.md) — write one in whatever you like.
 4. **The menu bar app is the product UI.** Configure keys, lighting, and adapters there. The daemon keeps the hardware alive underneath; `microbridgectl` is a support/debug escape hatch.
 

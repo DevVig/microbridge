@@ -96,6 +96,16 @@ Or open the DMG from the GitHub Release page and drag Microbridge into
 Applications, then install/start the daemon via Homebrew or the daemon
 archive.
 
+**In-app updates (direct installs).** A DMG/manual install updates itself:
+right-click the menu bar icon → **Check for Updates…**, or turn on *Settings →
+Updates → check automatically at launch* (off by default). The app downloads
+the signed update, verifies it, and relaunches. This is the only network call
+Microbridge makes, and only when you ask — the daemon stays zero-network.
+
+Homebrew installs are managed by brew instead: the app detects the brew
+marker and points you at `brew upgrade microbridge` rather than self-replacing,
+so the formula version and the on-disk app never drift apart.
+
 **Note:** Homebrew installs **prebuilt** release binaries (not a from-source
 Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 
