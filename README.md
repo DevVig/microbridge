@@ -129,7 +129,15 @@ Adapter PRs are explicitly welcome — that is the point of the project. Start w
 
 Microbridge is an independent community project. It is not affiliated with or endorsed by Work Louder or OpenAI. Driving the Micro's LEDs outside official software relies on best-effort reverse engineering of the device's HID protocol and may lag firmware updates.
 
-This project is only possible because OpenAI chose to keep the Micro open — an open protocol, a non-exclusive HID interface, and open tooling. That is a real choice, and we're grateful for it: see [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
+## Acknowledgments
+
+Microbridge only exists because the Codex Micro is *open* — and that was a choice, not an accident.
+
+OpenAI is a for-profit company, and it would have been easy to lock the Micro to a single first-party app: a closed protocol, an exclusive USB claim, no way for anyone else to light a key. They did the opposite — they ship the device kit in the open, keep the HID interface **non-exclusive** so third-party software can coexist with the official experience instead of fighting it, and keep giving users a choice (Codex CLI is open source; the models are reachable over documented APIs). None of that was required of them. **Thank you.**
+
+Thanks too to **Work Louder** for designing a genuinely hackable macropad, and to **everyone who writes an adapter, files an issue, or plugs in a device and tells us what really happens** — adapters are the point of this project.
+
+Full notes: [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
 
 ## License
 
