@@ -24,22 +24,22 @@ class Microbridge < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/DevVig/microbridge/releases/download/v#{version}/microbridge-v#{version}-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/DevVig/microbridge/releases/download/v0.1.0/microbridge-v0.1.0-aarch64-apple-darwin.tar.gz"
       # sha256 filled by scripts/bump-formula.sh after each release
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "d34c3c684940d7cbca3a06168b608fe1586a1668726453aa8013fe009558c2e2"
 
       resource "ui" do
-        url "https://github.com/DevVig/microbridge/releases/download/v#{version}/microbridge-ui-v#{version}-aarch64-apple-darwin.tar.gz"
-        sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+        url "https://github.com/DevVig/microbridge/releases/download/v0.1.0/microbridge-ui-v0.1.0-aarch64-apple-darwin.tar.gz"
+        sha256 "decbf9da3092772bef611925c31f424f650c3e74b8d220d9a27ddc74c5b2d4d8"
       end
     end
     on_intel do
-      url "https://github.com/DevVig/microbridge/releases/download/v#{version}/microbridge-v#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      url "https://github.com/DevVig/microbridge/releases/download/v0.1.0/microbridge-v0.1.0-x86_64-apple-darwin.tar.gz"
+      sha256 "bdc519c4157d0a199deef89f9890a77d688d6b51ec1ca0599c620fa8e28bbb5e"
 
       resource "ui" do
-        url "https://github.com/DevVig/microbridge/releases/download/v#{version}/microbridge-ui-v#{version}-x86_64-apple-darwin.tar.gz"
-        sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+        url "https://github.com/DevVig/microbridge/releases/download/v0.1.0/microbridge-ui-v0.1.0-x86_64-apple-darwin.tar.gz"
+        sha256 "ebf0bd949b2faf261c08d33f5db5b4161fd46be8f828c55b18ed4ffd40f63ddc"
       end
     end
   end
