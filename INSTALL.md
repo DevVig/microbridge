@@ -93,8 +93,9 @@ arch-specific menu bar app). On macOS, releases also include a
 ```
 
 Or open the DMG from the GitHub Release page and drag Microbridge into
-Applications, then install/start the daemon via Homebrew or the daemon
-archive.
+Applications. The direct-download app includes and starts its own local daemon;
+there is no second install step. If a Homebrew/launchd daemon is already
+running, the app uses that service instead of starting another copy.
 
 **In-app updates (direct installs).** A DMG/manual install updates itself:
 right-click the menu bar icon → **Check for Updates…**, or turn on *Settings →
@@ -124,6 +125,7 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | Path | Purpose |
 |---|---|
 | `~/Applications/Microbridge.app` | Menu bar app (primary UI) |
+| `Microbridge.app/Contents/MacOS/microbridged` | Bundled daemon for direct installs |
 | `$(brew --prefix)/bin/microbridged` | Daemon (Homebrew) |
 | `~/.local/bin/microbridged` | Daemon (source / release install) |
 | `~/.microbridge/microbridged.sock` | Local NDJSON socket |
@@ -133,7 +135,8 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 
 ## Troubleshooting
 
-**`microbridgectl: connect …`** — daemon not running.
+**`microbridgectl: connect …`** — daemon not running. Direct installs start the
+bundled daemon with the app; relaunch Microbridge first. For Homebrew installs:
 
 ```sh
 brew services restart microbridge

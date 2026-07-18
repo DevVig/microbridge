@@ -126,4 +126,57 @@ describe("Popover", () => {
     for (const session of sessions) expect(html).toContain(session.title);
     expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
   });
+
+  it("renders the daemon LED frame and clickable Agent Key assignment", () => {
+    const live = snapshot([
+      {
+        id: "codex:live",
+        app: "Codex",
+        title: "Live release thread",
+        state: "working",
+        updated_at_ms: Date.now(),
+      },
+    ]);
+    live.device_name = "mock";
+    live.agent_key_led_frame = {
+      keys: [
+        {
+          session_id: "codex:live",
+          state: "working",
+          color: "#12AB34",
+          focused: true,
+        },
+      ],
+      brightness: 60,
+      paused: false,
+    };
+    const html = renderToStaticMarkup(
+      <Popover
+        snapshot={live}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onQuit={noop}
+        onAgentKey={noop}
+      />,
+    );
+    expect(html).toContain("#12AB34");
+    expect(html).toContain("Agent Key 1: Live release thread");
+  });
+
+  it("shows an honest offline state instead of demo sessions", () => {
+    const offline = snapshot();
+    offline.device_name = "daemon-offline";
+    const html = renderToStaticMarkup(
+      <Popover
+        snapshot={offline}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(html).toContain("No live daemon connection is available");
+    expect(html).not.toContain("microbridge — HID reconnect on wake");
+  });
 });

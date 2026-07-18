@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mb_device::{parse_rgb_hex, Device, LedFrame};
 use mb_protocol::{
-    Action, AdapterCapabilities, AdapterConnectionState, AdapterKind, AdapterStatus, AgentState,
-    BusEvent, DaemonConfig, ServerMessage, SessionStatus, Snapshot, AGENT_KEY_COUNT,
+    Action, AdapterCapabilities, AdapterConnectionState, AdapterKind, AdapterStatus, AgentKeyLed,
+    AgentKeyLedFrame, AgentState, BusEvent, DaemonConfig, ServerMessage, SessionStatus, Snapshot,
+    AGENT_KEY_COUNT,
 };
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
@@ -65,10 +66,25 @@ impl DaemonState {
     pub fn snapshot(&self) -> Snapshot {
         let desc = self.device.descriptor();
         let keys = self.registry.agent_key_ids(&self.config);
+        let led_frame = self.resolved_led_frame(&keys);
         Snapshot {
             sessions: self.registry.session_list(),
             focused_session_id: self.registry.focused.clone(),
-            agent_key_session_ids: keys.into_iter().collect(),
+            agent_key_session_ids: keys.to_vec(),
+            agent_key_led_frame: AgentKeyLedFrame {
+                keys: keys
+                    .iter()
+                    .enumerate()
+                    .map(|(index, session_id)| AgentKeyLed {
+                        session_id: session_id.clone(),
+                        state: led_frame.keys[index],
+                        color: led_frame.key_colors[index].map(|color| format!("#{color:06X}")),
+                        focused: led_frame.focus_index == Some(index),
+                    })
+                    .collect(),
+                brightness: led_frame.brightness,
+                paused: led_frame.paused,
+            },
             device_connected: desc.connected,
             device_name: desc.name,
             config: self.config.clone(),
@@ -412,13 +428,36 @@ impl DaemonState {
             });
         }
         let keys = self.registry.agent_key_ids(&self.config);
+        let led_frame = self.resolved_led_frame(&keys);
         self.broadcast_ui(BusEvent::AgentKeysChanged {
             session_ids: keys.clone().into_iter().collect(),
+            led_frame: AgentKeyLedFrame {
+                keys: keys
+                    .iter()
+                    .enumerate()
+                    .map(|(index, session_id)| AgentKeyLed {
+                        session_id: session_id.clone(),
+                        state: led_frame.keys[index],
+                        color: led_frame.key_colors[index].map(|color| format!("#{color:06X}")),
+                        focused: led_frame.focus_index == Some(index),
+                    })
+                    .collect(),
+                brightness: led_frame.brightness,
+                paused: led_frame.paused,
+            },
         });
         self.render_leds(&keys);
     }
 
     pub fn render_leds(&mut self, keys: &[Option<String>; AGENT_KEY_COUNT]) {
+        let frame = self.resolved_led_frame(keys);
+        if frame != self.last_leds {
+            self.device.set_leds(&frame);
+            self.last_leds = frame;
+        }
+    }
+
+    fn resolved_led_frame(&self, keys: &[Option<String>; AGENT_KEY_COUNT]) -> LedFrame {
         let mut frame = LedFrame {
             keys: [None; AGENT_KEY_COUNT],
             key_colors: [None; AGENT_KEY_COUNT],
@@ -437,10 +476,7 @@ impl DaemonState {
                 frame.focus_index = Some(i);
             }
         }
-        if frame != self.last_leds {
-            self.device.set_leds(&frame);
-            self.last_leds = frame;
-        }
+        frame
     }
 
     pub fn route_action(&self, session_id: &str, action: Action) -> Result<(), String> {
@@ -508,13 +544,13 @@ impl DaemonState {
                 if let Some(slot) = self.last_agent_key_press.get_mut(index) {
                     *slot = if double { None } else { Some(now) };
                 }
-                self.focus_agent_key(index);
+                let _ = self.focus_agent_key(index);
                 if double {
                     self.handle_device_action(Action::OpenFocusedThread);
                 }
             }
             DeviceInput::AgentKeyDoublePress { index } => {
-                self.focus_agent_key(index);
+                let _ = self.focus_agent_key(index);
                 self.handle_device_action(Action::OpenFocusedThread);
             }
             DeviceInput::Approve => self.handle_device_action(Action::Approve),
@@ -564,26 +600,28 @@ impl DaemonState {
         let next = (current + offset).rem_euclid(sessions.len() as isize) as usize;
         let previous = self.registry.focused.clone();
         self.registry.focused = Some(sessions[next].id.clone());
-        if previous != self.registry.focused {
-            self.broadcast_ui(BusEvent::FocusChanged {
-                session_id: self.registry.focused.clone(),
-            });
-            let keys = self.registry.agent_key_ids(&self.config);
-            self.render_leds(&keys);
-        }
+        self.after_bus_change(previous);
     }
 
-    pub fn focus_agent_key(&mut self, index: usize) {
+    pub fn focus_agent_key(&mut self, index: usize) -> Result<String, String> {
         let keys = self.registry.agent_key_ids(&self.config);
-        if let Some(Some(id)) = keys.get(index) {
-            let prev = self.registry.focused.clone();
-            self.registry.focused = Some(id.clone());
-            if prev != self.registry.focused {
-                self.broadcast_ui(BusEvent::FocusChanged {
-                    session_id: self.registry.focused.clone(),
-                });
-                self.render_leds(&keys);
-            }
+        let id = keys
+            .get(index)
+            .and_then(Clone::clone)
+            .ok_or_else(|| format!("Agent Key {} is not assigned to a live thread.", index + 1))?;
+        let prev = self.registry.focused.clone();
+        self.registry.focused = Some(id.clone());
+        self.after_bus_change(prev);
+        Ok(id)
+    }
+
+    pub fn activate_agent_key(&mut self, index: usize, open: bool) -> Result<String, String> {
+        let session_id = self.focus_agent_key(index)?;
+        if open {
+            self.route_action(&session_id, Action::OpenFocusedThread)?;
+            Ok(format!("Opened Agent Key {} thread.", index + 1))
+        } else {
+            Ok(format!("Focused Agent Key {} thread.", index + 1))
         }
     }
 
@@ -826,6 +864,39 @@ mod tests {
         );
         state.expire_leased_sessions();
         assert!(!state.registry.sessions.contains_key("cursor:one"));
+    }
+
+    #[test]
+    fn snapshot_exposes_the_exact_effective_led_frame_and_activation() {
+        let mut state = state();
+        state.config.key_source = mb_protocol::KeySource::Custom;
+        state.config.custom_key_ids = vec![
+            "cursor:one".into(),
+            "cursor:two".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ];
+        state.config.lighting_preset = mb_protocol::LightingPreset::Phosphor;
+        state.config.normalize();
+        state.upsert_session(session("cursor:one", AgentState::Working), 0);
+        state.upsert_session(session("cursor:two", AgentState::AwaitingApproval), 0);
+
+        let activation = state.activate_agent_key(1, false).unwrap();
+        let snapshot = state.snapshot();
+        assert_eq!(activation, "Focused Agent Key 2 thread.");
+        assert_eq!(snapshot.focused_session_id.as_deref(), Some("cursor:two"));
+        assert_eq!(
+            snapshot.agent_key_led_frame.keys[0].color.as_deref(),
+            Some("#FF6A00")
+        );
+        assert_eq!(
+            snapshot.agent_key_led_frame.keys[1].color.as_deref(),
+            Some("#FF3D00")
+        );
+        assert!(snapshot.agent_key_led_frame.keys[1].focused);
+        assert!(state.activate_agent_key(5, false).is_err());
     }
 
     const T3_OWNER_FOR_TEST: u64 = 77;

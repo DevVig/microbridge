@@ -161,8 +161,12 @@ pub fn apply_event(snap: &mut Snapshot, event: BusEvent) {
         BusEvent::FocusChanged { session_id } => {
             snap.focused_session_id = session_id;
         }
-        BusEvent::AgentKeysChanged { session_ids } => {
+        BusEvent::AgentKeysChanged {
+            session_ids,
+            led_frame,
+        } => {
             snap.agent_key_session_ids = session_ids;
+            snap.agent_key_led_frame = led_frame;
         }
         BusEvent::DeviceChanged { connected, name } => {
             snap.device_connected = connected;

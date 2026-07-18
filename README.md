@@ -89,6 +89,10 @@ docs/                  protocol, architecture, adapter guide, design, HID notes
 
 Full guide: **[INSTALL.md](INSTALL.md)**. Governance / branch rules: **[docs/governance.md](docs/governance.md)**.
 
+**Direct macOS download:** the signed/notarized DMG is self-contained and
+includes the local daemon. Drag Microbridge to Applications and open it; no
+separate daemon or Marketplace plugin download is required.
+
 **macOS (recommended — Homebrew installs the menu bar app + daemon):**
 
 ```sh

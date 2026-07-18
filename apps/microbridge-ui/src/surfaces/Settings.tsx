@@ -82,6 +82,7 @@ export function Settings({
   onTab,
   onConfig,
   onClose,
+  onAgentKey,
 }: {
   snapshot: Snapshot;
   dark: boolean;
@@ -89,6 +90,7 @@ export function Settings({
   onTab: (t: Tab) => void;
   onConfig: (config: DaemonConfig) => void;
   onClose: () => void;
+  onAgentKey?: (index: number, open: boolean) => void;
 }) {
   const t = dark ? DARK : LIGHT;
   const cfg = snapshot.config;
@@ -192,6 +194,7 @@ export function Settings({
                   snapshot={snapshot}
                   selected={selected}
                   onSelect={setSelected}
+                  onAgentKey={onAgentKey}
                 />
               </div>
             </div>
@@ -247,8 +250,12 @@ export function Settings({
                   ? snapshot.sessions.find((x) => x.id === id)
                   : null;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={i}
+                    disabled={!s}
+                    onClick={() => onAgentKey?.(i, false)}
+                    onDoubleClick={() => onAgentKey?.(i, true)}
                     className="rounded-xl p-3"
                     style={{
                       backgroundColor: t.panel,
@@ -285,7 +292,7 @@ export function Settings({
                         Unassigned
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -512,6 +519,10 @@ export function Settings({
               Cursor ships inside Microbridge and installs locally with one
               click. Community describes ownership, not readiness. State and
               capabilities below are live.
+            </p>
+            <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
+              T3-hosted Codex threads are identified automatically. Enable and pair
+              the T3 Code card only when you also want T3&apos;s supported thread controls.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>

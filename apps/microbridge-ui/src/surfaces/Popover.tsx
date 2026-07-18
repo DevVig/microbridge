@@ -68,16 +68,19 @@ export function Popover({
   onOpenSettings,
   onTogglePause,
   onQuit,
+  onAgentKey,
 }: {
   snapshot: Snapshot;
   dark: boolean;
   onOpenSettings: () => void;
   onTogglePause: () => void;
   onQuit: () => void;
+  onAgentKey?: (index: number, open: boolean) => void;
 }) {
   const t = dark ? DARK : LIGHT;
   const demo = snapshot.device_name === "demo-browser";
   const simulator = snapshot.device_name === "mock" || demo;
+  const daemonOffline = snapshot.device_name === "daemon-offline";
   const detected =
     !snapshot.device_connected && snapshot.device_name.includes("usb");
   // Show the live UI shell in simulator/detected modes; only "Connected"
@@ -272,7 +275,7 @@ export function Popover({
             </div>
 
             <div className="flex justify-center px-3 pb-3">
-              <DeviceEcho t={t} snapshot={snapshot} />
+              <DeviceEcho t={t} snapshot={snapshot} onAgentKey={onAgentKey} />
             </div>
 
             <div
@@ -304,8 +307,14 @@ export function Popover({
               ) : (
                 <div ref={threadListRef} className="mb-scrollbar min-h-0 overflow-y-auto">
                   {threads.map((s) => (
-                    <div
+                    <button
+                      type="button"
                       key={s.id}
+                      onClick={() => {
+                        const index = snapshot.agent_key_session_ids.indexOf(s.id);
+                        if (index >= 0) onAgentKey?.(index, false);
+                      }}
+                      disabled={!snapshot.agent_key_session_ids.includes(s.id)}
                       className="flex items-center gap-2 rounded-lg px-2 py-1.5"
                     >
                     <span
@@ -330,7 +339,7 @@ export function Popover({
                     >
                       {elapsed(s.updated_at_ms)}
                     </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -338,20 +347,20 @@ export function Popover({
           </>
         ) : (
           <div className="flex flex-col items-center px-6 pb-6 pt-2 text-center">
-            <DeviceEcho t={t} snapshot={snapshot} />
+            <DeviceEcho t={t} snapshot={snapshot} onAgentKey={onAgentKey} />
             <p
               className="mt-4 text-[14px] font-semibold"
               style={{ color: t.text }}
             >
-              Connect your Codex Micro
+              {daemonOffline ? "Starting Microbridge services…" : "Connect your Codex Micro"}
             </p>
             <p
               className="mt-1 max-w-[240px] text-[12px] leading-relaxed"
               style={{ color: t.textSecondary }}
             >
-              Plug in over USB-C, then enable hardware control in Device
-              settings. If another app owns the HID interface, Microbridge keeps
-              observing threads without claiming the deck.
+              {daemonOffline
+                ? "No live daemon connection is available, so the app is showing no threads rather than simulated data."
+                : "Plug in over USB-C, then enable hardware control in Device settings. If another app owns the HID interface, Microbridge keeps observing threads without claiming the deck."}
             </p>
           </div>
         )}

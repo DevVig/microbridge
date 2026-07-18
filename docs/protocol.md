@@ -130,18 +130,35 @@ and key-assignment lists. Persisted at
 Pairing tokens are exchanged immediately and are never written to config or
 logs. `adapter_operation` returns a success/failure acknowledgment.
 
+### Simulated Agent Key activation
+
+```json
+{"type":"activate_agent_key","index":2,"open":false}
+```
+
+`index` is zero-based. This follows the same focus route as a physical Agent
+Key. With `open:true`, the daemon additionally requests `open_focused_thread`
+only when the owning adapter advertises `focus_open`.
+
 ## Messages: daemon → UI
 
 ### `snapshot`
 
 Full bus view: sessions, focused session, six Agent Key assignments, device
-connection, config, and live adapter states/capabilities.
+connection, config, live adapter states/capabilities, and
+`agent_key_led_frame`. The frame is the exact device-layer input after palette
+normalization and includes each key's session, state, `#RRGGBB` color, focus,
+plus frame brightness and pause state. An omitted legacy frame defaults empty
+so newer UIs can derive a compatibility view from the assignments.
 
 ### `event`
 
 Incremental `BusEvent`: `session_upserted`, `session_removed`,
 `focus_changed`, `agent_keys_changed`, `device_changed`, `config_changed`,
 `adapters_changed`.
+
+`agent_keys_changed` carries both `session_ids` and the resolved `led_frame` so
+the software twin and physical device cannot drift between full snapshots.
 
 `adapters_changed` carries the complete live adapter-card list, not an
 invalidation token:

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  activateAgentKey,
   closeSettings,
   openSettings,
   quitUi,
@@ -109,6 +110,7 @@ export default function App() {
         onTab={setTab}
         onConfig={(c) => void applyConfig(c)}
         onClose={() => void closeSettings()}
+        onAgentKey={(index, open) => void activateAgentKey(index, open)}
       />
     );
   }
@@ -125,6 +127,7 @@ export default function App() {
         })
       }
       onQuit={() => void quitUi()}
+      onAgentKey={(index, open) => void activateAgentKey(index, open)}
     />
   );
 }

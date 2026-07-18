@@ -85,10 +85,46 @@ export interface Snapshot {
   sessions: SessionStatus[];
   focused_session_id: string | null;
   agent_key_session_ids: (string | null)[];
+  agent_key_led_frame?: AgentKeyLedFrame;
   device_connected: boolean;
   device_name: string;
   config: DaemonConfig;
   adapters: AdapterStatus[];
+}
+
+export interface AgentKeyLed {
+  session_id: string | null;
+  state: AgentState | null;
+  color: string | null;
+  focused: boolean;
+}
+
+export interface AgentKeyLedFrame {
+  keys: AgentKeyLed[];
+  brightness: number;
+  paused: boolean;
+}
+
+/** Backward-compatible effective frame for snapshots from older daemons. */
+export function agentKeyLedFrame(snapshot: Snapshot): AgentKeyLedFrame {
+  if (snapshot.agent_key_led_frame?.keys?.length) {
+    return snapshot.agent_key_led_frame;
+  }
+  return {
+    keys: snapshot.agent_key_session_ids.map((sessionId) => {
+      const session = sessionId
+        ? snapshot.sessions.find((candidate) => candidate.id === sessionId)
+        : null;
+      return {
+        session_id: sessionId,
+        state: session?.state ?? null,
+        color: session ? snapshot.config.state_colors[session.state] : null,
+        focused: sessionId != null && sessionId === snapshot.focused_session_id,
+      };
+    }),
+    brightness: snapshot.config.brightness,
+    paused: snapshot.config.pause_leds,
+  };
 }
 
 export const STATE_COLORS: Record<AgentState, string> = {

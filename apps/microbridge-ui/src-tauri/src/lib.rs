@@ -3,16 +3,18 @@
 
 mod bus;
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use bus::{apply_event, spawn_bus_loop, BusHandle, CachedSnapshot};
 use mb_protocol::{BusEvent, ClientMessage, DaemonConfig, ServerMessage, Snapshot};
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow,
 };
@@ -21,6 +23,58 @@ use tokio::sync::Mutex;
 struct AppState {
     bus: BusHandle,
     snapshot: CachedSnapshot,
+    bundled_daemon: StdMutex<Option<Child>>,
+}
+
+fn daemon_socket_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MICROBRIDGE_SOCKET") {
+        return PathBuf::from(path);
+    }
+    let user_home = std::env::var_os("HOME").unwrap_or_else(|| ".".into());
+    PathBuf::from(user_home)
+        .join(".microbridge")
+        .join("microbridged.sock")
+}
+
+fn daemon_is_reachable() -> bool {
+    StdUnixStream::connect(daemon_socket_path()).is_ok()
+}
+
+/// Direct-download builds carry `microbridged` beside the UI executable. If a
+/// Homebrew/launchd daemon is already reachable we leave it alone; otherwise
+/// the app owns this child for its lifetime.
+fn start_bundled_daemon() -> Option<Child> {
+    if daemon_is_reachable() {
+        return None;
+    }
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            candidates.push(directory.join("microbridged"));
+        }
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/microbridged"),
+        PathBuf::from("/usr/local/bin/microbridged"),
+    ]);
+    let binary = candidates.into_iter().find(|candidate| candidate.is_file())?;
+
+    let log_path = daemon_socket_path().with_file_name("microbridged-app.log");
+    if let Some(directory) = log_path.parent() {
+        let _ = fs::create_dir_all(directory);
+    }
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok()?;
+    let stderr = stdout.try_clone().ok()?;
+    Command::new(binary)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .ok()
 }
 
 const CURSOR_PLUGIN_NAME: &str = "microbridge";
@@ -466,6 +520,18 @@ async fn forget_adapter(
     Ok(message)
 }
 
+#[tauri::command]
+async fn activate_agent_key(
+    index: usize,
+    open: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .bus
+        .adapter_operation(ClientMessage::ActivateAgentKey { index, open })
+        .await
+}
+
 /// Fit the popover to its measured card while leaving a safety margin at the
 /// bottom of the active display. The frontend gives only Threads the overflow.
 #[tauri::command]
@@ -586,6 +652,7 @@ pub fn run() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
+            let bundled_daemon = start_bundled_daemon();
             let (bus, mut event_rx) = spawn_bus_loop();
             let snapshot: CachedSnapshot = Arc::new(Mutex::new(None));
             let hud_generation = Arc::new(AtomicU64::new(0));
@@ -675,7 +742,11 @@ pub fn run() {
             });
 
             let _ = hud_generation; // owned by the bus event loop
-            app.manage(AppState { bus, snapshot });
+            app.manage(AppState {
+                bus,
+                snapshot,
+                bundled_daemon: StdMutex::new(bundled_daemon),
+            });
 
             // Dedicated monochrome tray glyph (bridge silhouette), rendered as a
             // template image so macOS tints it for light/dark menu bars. The full
@@ -705,13 +776,16 @@ pub fn run() {
                     &quit_item,
                 ],
             )?;
+            let context_menu = tray_menu.clone();
 
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .icon_as_template(true)
                 .tooltip("Microbridge")
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
+                // Keep the utility menu detached. On macOS an attached NSMenu
+                // can consume the status-item click before the tray callback,
+                // making left and right clicks indistinguishable. We pop it up
+                // explicitly only for a right-button release below.
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "check-updates" => trigger_update_check(app),
                     "settings" => show_settings_window(app),
@@ -719,28 +793,39 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(move |tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        rect,
-                        ..
-                    } = event
-                    {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let previous = last_left_click_ms.swap(now, Ordering::Relaxed);
-                        if now.saturating_sub(previous) < 180 {
-                            return;
+                    match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            rect,
+                            ..
+                        } => {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            let previous = last_left_click_ms.swap(now, Ordering::Relaxed);
+                            if now.saturating_sub(previous) < 180 {
+                                return;
+                            }
+                            let app = tray.app_handle();
+                            let scale = app
+                                .get_webview_window("popover")
+                                .and_then(|w| w.scale_factor().ok())
+                                .unwrap_or(2.0);
+                            let (x, y, w, h) = physical_tray_rect(&rect, scale);
+                            toggle_popover(app, x, y, w, h);
                         }
-                        let app = tray.app_handle();
-                        let scale = app
-                            .get_webview_window("popover")
-                            .and_then(|w| w.scale_factor().ok())
-                            .unwrap_or(2.0);
-                        let (x, y, w, h) = physical_tray_rect(&rect, scale);
-                        toggle_popover(app, x, y, w, h);
+                        TrayIconEvent::Click {
+                            button: MouseButton::Right,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            if let Some(window) = tray.app_handle().get_webview_window("popover") {
+                                let _ = context_menu.popup(window.as_ref().window());
+                            }
+                        }
+                        _ => {}
                     }
                 })
                 .build(app)?;
@@ -772,6 +857,7 @@ pub fn run() {
             set_adapter_enabled,
             pair_adapter,
             forget_adapter,
+            activate_agent_key,
             fit_popover,
             open_settings,
             close_settings,
@@ -780,6 +866,18 @@ pub fn run() {
             update_channel,
             app_version
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running microbridge-ui");
+        .build(tauri::generate_context!())
+        .expect("error while building microbridge-ui")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(mut guard) = state.bundled_daemon.lock() {
+                        if let Some(mut child) = guard.take() {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                    }
+                }
+            }
+        });
 }
