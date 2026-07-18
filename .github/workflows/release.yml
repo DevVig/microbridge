@@ -139,19 +139,32 @@ jobs:
       - name: Package .app and DMG
         run: |
           set -euo pipefail
-          APP="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos \
-            apps/microbridge-ui/src-tauri/target/release/bundle/macos \
-            -name 'Microbridge.app' -type d 2>/dev/null | head -n1)"
-          test -n "$APP"
+          # Locate bundles without failing under pipefail when a search root is absent.
+          echo "==> bundle tree (debug)"
+          find apps/microbridge-ui/src-tauri/target -path '*/bundle/*' \( -name '*.app' -o -name '*.dmg' \) 2>/dev/null | head -50 || true
+
+          APP=""
+          while IFS= read -r candidate; do
+            APP="$candidate"
+            break
+          done < <(find apps/microbridge-ui/src-tauri/target -type d -name 'Microbridge.app' 2>/dev/null || true)
+          if [[ -z "$APP" ]]; then
+            echo "error: Microbridge.app not found under src-tauri/target" >&2
+            exit 1
+          fi
+          echo "Using APP=$APP"
+
           STAGE="microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "staging/${STAGE}" "ui-out"
           cp -R "$APP" "staging/${STAGE}/"
           cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
           tar -C staging -czf "ui-out/${STAGE}.tar.gz" "${STAGE}"
 
-          DMG="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/dmg \
-            apps/microbridge-ui/src-tauri/target/release/bundle/dmg \
-            -name '*.dmg' -type f 2>/dev/null | head -n1 || true)"
+          DMG=""
+          while IFS= read -r candidate; do
+            DMG="$candidate"
+            break
+          done < <(find apps/microbridge-ui/src-tauri/target -type f -name '*.dmg' 2>/dev/null || true)
           if [[ -n "${DMG:-}" ]]; then
             DMG_OUT="ui-out/microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}.dmg"
             cp "$DMG" "$DMG_OUT"
