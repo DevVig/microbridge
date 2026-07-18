@@ -65,25 +65,108 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/microbridge-ui/package-lock.json
-      - name: Build Microbridge.app
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
+            echo "APPLE_CERTIFICATE secret missing — UI build will be unsigned"
+            echo "SIGNED=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "SIGNED=1" >> "$GITHUB_ENV"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$CERT_PATH" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security list-keychains -d user -s build.keychain $(security list-keychains -d user | sed -e 's/"//g')
+          IDENTITY="${{ secrets.APPLE_SIGNING_IDENTITY }}"
+          if [[ -z "$IDENTITY" ]]; then
+            IDENTITY="$(security find-identity -v -p codesigning build.keychain \
+              | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          fi
+          test -n "$IDENTITY"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning build.keychain
+
+      - name: Prepare App Store Connect API key for notarization
+        if: env.SIGNED == '1'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          test -n "${APPLE_API_KEY:-}"
+          test -n "${APPLE_API_ISSUER:-}"
+          test -n "${APPLE_API_KEY_P8:-}"
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          {
+            echo "APPLE_API_KEY=$APPLE_API_KEY"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+            echo "APPLE_API_KEY_PATH=$KEY_PATH"
+            echo "APPLE_TEAM_ID=${APPLE_TEAM_ID:-3NQG568C4Q}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed Microbridge.app + DMG
         working-directory: apps/microbridge-ui
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ env.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: |
           npm ci
-          npm run tauri build -- --bundles app --target ${{ matrix.target }}
-      - name: Package .app
+          if [[ "${SIGNED:-0}" == "1" ]]; then
+            npm run tauri build -- --bundles app,dmg --target ${{ matrix.target }}
+          else
+            npm run tauri build -- --bundles app --target ${{ matrix.target }}
+          fi
+
+      - name: Package .app and DMG
         run: |
-          APP="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos apps/microbridge-ui/src-tauri/target/release/bundle/macos -name 'Microbridge.app' -type d 2>/dev/null | head -n1)"
+          set -euo pipefail
+          APP="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos \
+            apps/microbridge-ui/src-tauri/target/release/bundle/macos \
+            -name 'Microbridge.app' -type d 2>/dev/null | head -n1)"
           test -n "$APP"
           STAGE="microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir -p "staging/${STAGE}"
+          mkdir -p "staging/${STAGE}" "ui-out"
           cp -R "$APP" "staging/${STAGE}/"
           cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
-          tar -C staging -czf "${STAGE}.tar.gz" "${STAGE}"
-          echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+          tar -C staging -czf "ui-out/${STAGE}.tar.gz" "${STAGE}"
+
+          DMG="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/dmg \
+            apps/microbridge-ui/src-tauri/target/release/bundle/dmg \
+            -name '*.dmg' -type f 2>/dev/null | head -n1 || true)"
+          if [[ -n "${DMG:-}" ]]; then
+            DMG_OUT="ui-out/microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}.dmg"
+            cp "$DMG" "$DMG_OUT"
+            echo "Packed signed DMG: $DMG_OUT"
+            spctl --assess --type open --context context:primary-signature "$DMG_OUT" || true
+            codesign -dv --verbose=2 "$APP" || true
+          else
+            echo "No DMG produced (unsigned build or bundle skipped)"
+          fi
+          ls -la ui-out
+
       - uses: actions/upload-artifact@v7
         with:
           name: ui-${{ matrix.target }}
-          path: ${{ env.ASSET }}
+          path: ui-out/*
 
   publish:
     name: publish release
@@ -97,7 +180,7 @@ jobs:
       - name: Collect assets
         run: |
           mkdir -p release-assets
-          find artifacts -name '*.tar.gz' -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.dmg' \) -exec cp {} release-assets/ \;
           ls -la release-assets
       - uses: softprops/action-gh-release@v3
         with:
@@ -116,6 +199,12 @@ jobs:
             ```
 
             Upgrade later: `brew update && brew upgrade microbridge`
+
+            ### Direct download (signed + notarized DMG)
+
+            Grab `microbridge-ui-${{ github.ref_name }}-aarch64-apple-darwin.dmg` (Apple Silicon)
+            or `…-x86_64-apple-darwin.dmg` (Intel) from the assets below, open it, and drag
+            Microbridge into Applications. Pair with the daemon archive or Homebrew formula.
 
             Binary + app archive: `./scripts/install-from-release.sh ${{ github.ref_name }}`
 

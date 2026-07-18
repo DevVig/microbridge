@@ -102,28 +102,22 @@ EOF
   launchctl enable "gui/$(id -u)/${LABEL}"
   launchctl kickstart -k "gui/$(id -u)/${LABEL}"
 
-  UI_ASSET="microbridge-ui-${TAG}-${TARGET}.tar.gz"
-  UI_URL="https://github.com/${REPO}/releases/download/${TAG}/${UI_ASSET}"
-  # Backward-compatible fallback for older releases that shipped a single asset.
-  UI_FALLBACK="microbridge-ui-${TAG}-macos.tar.gz"
-  echo "==> Downloading menu bar app $UI_URL"
-  if curl -fsSL -o "$TMP/$UI_ASSET" "$UI_URL" \
-    || curl -fsSL -o "$TMP/$UI_ASSET" "https://github.com/${REPO}/releases/download/${TAG}/${UI_FALLBACK}"; then
-    tar -xzf "$TMP/$UI_ASSET" -C "$TMP"
-    APP_SRC="$(find "$TMP" -name 'Microbridge.app' -type d | head -n1 || true)"
-    if [[ -n "$APP_SRC" ]]; then
-      DEST="$HOME/Applications/Microbridge.app"
-      MARKER="$DEST/.microbridge-release"
-      if [[ -d "$DEST" && ! -f "$MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
-        echo "    warning: $DEST exists and is not release-managed — leave it"
-        echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
-      else
-        rm -rf "$DEST"
-        mkdir -p "$HOME/Applications"
-        cp -R "$APP_SRC" "$DEST"
-        echo "owned-by-release" >"$MARKER"
-        UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
-        cat >"$UI_PLIST" <<EOF
+  DEST="$HOME/Applications/Microbridge.app"
+  MARKER="$DEST/.microbridge-release"
+  install_app_bundle() {
+    local APP_SRC="$1"
+    if [[ -d "$DEST" && ! -f "$MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
+      echo "    warning: $DEST exists and is not release-managed — leave it"
+      echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
+      return 0
+    fi
+    rm -rf "$DEST"
+    mkdir -p "$HOME/Applications"
+    cp -R "$APP_SRC" "$DEST"
+    xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+    echo "owned-by-release" >"$MARKER"
+    UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
+    cat >"$UI_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -141,17 +135,49 @@ EOF
 </dict>
 </plist>
 EOF
-        launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
-        launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
-        launchctl enable "gui/$(id -u)/${UI_LABEL}"
-        launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
-        echo "    installed ~/Applications/Microbridge.app"
+    launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
+    launchctl enable "gui/$(id -u)/${UI_LABEL}"
+    launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
+    echo "    installed ~/Applications/Microbridge.app"
+  }
+
+  DMG_ASSET="microbridge-ui-${TAG}-${TARGET}.dmg"
+  DMG_URL="https://github.com/${REPO}/releases/download/${TAG}/${DMG_ASSET}"
+  UI_ASSET="microbridge-ui-${TAG}-${TARGET}.tar.gz"
+  UI_URL="https://github.com/${REPO}/releases/download/${TAG}/${UI_ASSET}"
+  # Backward-compatible fallback for older releases that shipped a single asset.
+  UI_FALLBACK="microbridge-ui-${TAG}-macos.tar.gz"
+
+  INSTALLED_UI=0
+  echo "==> Trying signed DMG $DMG_URL"
+  if curl -fsSL -o "$TMP/$DMG_ASSET" "$DMG_URL"; then
+    MOUNT="$(mktemp -d "$TMP/dmg.XXXXXX")"
+    if hdiutil attach "$TMP/$DMG_ASSET" -mountpoint "$MOUNT" -nobrowse -quiet; then
+      APP_SRC="$(find "$MOUNT" -name 'Microbridge.app' -type d | head -n1 || true)"
+      if [[ -n "$APP_SRC" ]]; then
+        install_app_bundle "$APP_SRC"
+        INSTALLED_UI=1
+      fi
+      hdiutil detach "$MOUNT" -quiet || true
+    fi
+  fi
+
+  if [[ "$INSTALLED_UI" -eq 0 ]]; then
+    echo "==> Downloading menu bar app archive $UI_URL"
+    if curl -fsSL -o "$TMP/$UI_ASSET" "$UI_URL" \
+      || curl -fsSL -o "$TMP/$UI_ASSET" "https://github.com/${REPO}/releases/download/${TAG}/${UI_FALLBACK}"; then
+      tar -xzf "$TMP/$UI_ASSET" -C "$TMP"
+      APP_SRC="$(find "$TMP" -name 'Microbridge.app' -type d | head -n1 || true)"
+      if [[ -n "$APP_SRC" ]]; then
+        install_app_bundle "$APP_SRC"
+        INSTALLED_UI=1
+      else
+        echo "    warning: archive had no Microbridge.app"
       fi
     else
-      echo "    warning: archive had no Microbridge.app"
+      echo "    warning: no UI asset for ${TAG} — install UI with ./scripts/install.sh or brew"
     fi
-  else
-    echo "    warning: no UI asset for ${TAG} — install UI with ./scripts/install.sh or brew"
   fi
 fi
 
