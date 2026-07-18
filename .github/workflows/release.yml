@@ -389,9 +389,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: formula-${{ github.ref_name }}
-          path: candidate
+          path: ${{ runner.temp }}/candidate
       - name: Install, launch, and remove candidate formula
-        run: ./scripts/smoke-formula.sh candidate/microbridge.rb "${GITHUB_REF_NAME#v}" "${{ matrix.arch }}"
+        run: ./scripts/smoke-formula.sh "$RUNNER_TEMP/candidate/microbridge.rb" "${GITHUB_REF_NAME#v}" "${{ matrix.arch }}"
 
   bump-formula:
     name: open Homebrew formula PR
@@ -404,9 +404,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: formula-${{ github.ref_name }}
-          path: candidate
+          path: ${{ runner.temp }}/candidate
       - name: Use smoke-tested formula
-        run: cp candidate/microbridge.rb Formula/microbridge.rb
+        run: cp "$RUNNER_TEMP/candidate/microbridge.rb" Formula/microbridge.rb
       - name: Open PR
         id: formula-pr
         uses: peter-evans/create-pull-request@v7

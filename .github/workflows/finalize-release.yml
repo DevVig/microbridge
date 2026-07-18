@@ -138,7 +138,7 @@ jobs:
           )
           path.write_text(body)
           PY
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --notes-file "$BODY_FILE"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest --notes-file "$BODY_FILE"
           {
             echo "## Release finalized"
             echo "GitHub assets: published"
