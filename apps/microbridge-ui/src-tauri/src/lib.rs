@@ -10,6 +10,7 @@ use std::time::Duration;
 use bus::{apply_event, spawn_bus_loop, BusHandle, CachedSnapshot};
 use mb_protocol::{BusEvent, DaemonConfig, ServerMessage, Snapshot};
 use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
@@ -115,16 +116,21 @@ async fn set_config(
     Ok(next)
 }
 
-#[tauri::command]
-async fn open_settings(app: AppHandle) -> Result<(), String> {
+/// Show the settings window (and hide the popover). Shared by the `open_settings`
+/// command and the tray right-click menu.
+fn show_settings_window(app: &AppHandle) {
     if let Some(popover) = app.get_webview_window("popover") {
         let _ = popover.hide();
     }
-    let window = app
-        .get_webview_window("settings")
-        .ok_or("settings window missing")?;
-    let _ = window.show();
-    let _ = window.set_focus();
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+async fn open_settings(app: AppHandle) -> Result<(), String> {
+    show_settings_window(&app);
     Ok(())
 }
 
@@ -225,10 +231,32 @@ pub fn run() {
             // app icon is an opaque squircle and would appear as a black blob here.
             let tray_icon = tauri::include_image!("icons/tray.png");
 
+            // Right-click context menu. Left-click still toggles the popover
+            // (`show_menu_on_left_click(false)` keeps the menu on right-click only).
+            let settings_item =
+                MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let quit_item =
+                MenuItem::with_id(app, "quit", "Quit Microbridge", true, Some("CmdOrCtrl+Q"))?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &settings_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit_item,
+                ],
+            )?;
+
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .icon_as_template(true)
                 .tooltip("Microbridge")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "settings" => show_settings_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
