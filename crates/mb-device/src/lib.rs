@@ -184,9 +184,7 @@ fn usb_micro_present() -> bool {
             return false;
         };
         let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        text.contains("codex micro")
-            || text.contains("work louder")
-            || text.contains("kbd-1.0")
+        text.contains("codex micro") || text.contains("work louder") || text.contains("kbd-1.0")
     }
     #[cfg(not(target_os = "macos"))]
     {

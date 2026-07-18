@@ -35,8 +35,7 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
 
     for root in candidates {
         let tx = tx.clone();
-        let seen: Arc<Mutex<HashMap<String, Fingerprint>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let seen: Arc<Mutex<HashMap<String, Fingerprint>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_cb = Arc::clone(&seen);
         watch_dir(root, move |path| {
             if path_components_contain(&path, "subagents") {
@@ -93,7 +92,8 @@ fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
             .or_else(|| value.get("type"))
             .and_then(|v| v.as_str());
 
-        if matches!(role, Some("user")) || value.get("type").and_then(|v| v.as_str()) == Some("user")
+        if matches!(role, Some("user"))
+            || value.get("type").and_then(|v| v.as_str()) == Some("user")
         {
             if let Some(text) = extract_text(&msg).or_else(|| extract_text(&value)) {
                 if !looks_like_boilerplate(&text) && title.is_none() {
