@@ -220,13 +220,13 @@ pub fn run() {
             let _ = hud_generation; // owned by the bus event loop
             app.manage(AppState { bus, snapshot });
 
-            let icon = app
-                .default_window_icon()
-                .cloned()
-                .expect("default window icon");
+            // Dedicated monochrome tray glyph (bridge silhouette), rendered as a
+            // template image so macOS tints it for light/dark menu bars. The full
+            // app icon is an opaque squircle and would appear as a black blob here.
+            let tray_icon = tauri::include_image!("icons/tray.png");
 
             let _tray = TrayIconBuilder::new()
-                .icon(icon)
+                .icon(tray_icon)
                 .icon_as_template(true)
                 .tooltip("Microbridge")
                 .on_tray_icon_event(|tray, event| {
