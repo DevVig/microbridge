@@ -20,7 +20,9 @@ use url::Url;
 use crate::state::DaemonState;
 
 pub const T3_OWNER: u64 = u64::MAX - 1;
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.microbridge.t3code";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_ACCOUNT: &str = "paired-environment";
 const SUPPORTED_SERVER_VERSION: &str = "0.0.28";
 const PINNED_CONTRACT_COMMIT: &str = "ebe8afb1df357423a0e036b388af3e739d640205";
