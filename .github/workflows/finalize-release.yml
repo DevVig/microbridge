@@ -49,6 +49,7 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          export HOMEBREW_NO_COLOR=1
           test "$(uname -m)" = "$EXPECTED_ARCH"
           brew tap DevVig/microbridge https://github.com/DevVig/microbridge
           brew update
