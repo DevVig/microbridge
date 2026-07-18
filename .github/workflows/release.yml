@@ -131,12 +131,22 @@ jobs:
           APPLE_API_ISSUER: ${{ env.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
           APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           npm ci
+          # createUpdaterArtifacts (tauri.conf.json) requires the updater signing
+          # key. Forks without the secret still build — just without in-app
+          # updater artifacts (they can use the DMG / Homebrew).
+          UPDATER_OFF=()
+          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY missing — building without updater artifacts"
+            UPDATER_OFF=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
           if [[ "${SIGNED:-0}" == "1" ]]; then
-            npm run tauri build -- --bundles app,dmg --target ${{ matrix.target }}
+            npm run tauri build -- --bundles app,dmg --target ${{ matrix.target }} "${UPDATER_OFF[@]}"
           else
-            npm run tauri build -- --bundles app --target ${{ matrix.target }}
+            npm run tauri build -- --bundles app --target ${{ matrix.target }} "${UPDATER_OFF[@]}"
           fi
 
       - name: Package .app and DMG
@@ -177,6 +187,26 @@ jobs:
           else
             echo "No DMG produced (unsigned build or bundle skipped)"
           fi
+
+          # Updater artifacts (in-app self-updater). Renamed per-arch so the two
+          # matrix legs don't collide as release assets; latest.json points here.
+          UPD=""
+          while IFS= read -r candidate; do
+            UPD="$candidate"
+            break
+          done < <(find apps/microbridge-ui/src-tauri/target -type f -name '*.app.tar.gz' 2>/dev/null || true)
+          SIG=""
+          while IFS= read -r candidate; do
+            SIG="$candidate"
+            break
+          done < <(find apps/microbridge-ui/src-tauri/target -type f -name '*.app.tar.gz.sig' 2>/dev/null || true)
+          if [[ -n "$UPD" && -n "$SIG" ]]; then
+            cp "$UPD" "ui-out/Microbridge-${{ matrix.target }}.app.tar.gz"
+            cp "$SIG" "ui-out/Microbridge-${{ matrix.target }}.app.tar.gz.sig"
+            echo "Packed updater artifact for ${{ matrix.target }}"
+          else
+            echo "No updater artifact produced (updater disabled or signing key absent)"
+          fi
           ls -la ui-out
 
       - uses: actions/upload-artifact@v7
@@ -198,6 +228,31 @@ jobs:
           mkdir -p release-assets
           find artifacts -type f \( -name '*.tar.gz' -o -name '*.dmg' \) -exec cp {} release-assets/ \;
           ls -la release-assets
+      - name: Generate updater manifest (latest.json)
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          BASE="https://github.com/DevVig/microbridge/releases/download/${TAG}"
+          SIG_AARCH="$(find artifacts -type f -name 'Microbridge-aarch64-apple-darwin.app.tar.gz.sig' | head -1)"
+          SIG_X86="$(find artifacts -type f -name 'Microbridge-x86_64-apple-darwin.app.tar.gz.sig' | head -1)"
+          if [[ -z "$SIG_AARCH" || -z "$SIG_X86" ]]; then
+            echo "Updater signatures missing — skipping latest.json (no in-app update for this release)"
+            exit 0
+          fi
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Microbridge ${TAG}. See the GitHub release notes for details." \
+            --arg pub_date "$PUB_DATE" \
+            --arg sig_a "$(cat "$SIG_AARCH")" \
+            --arg url_a "${BASE}/Microbridge-aarch64-apple-darwin.app.tar.gz" \
+            --arg sig_x "$(cat "$SIG_X86")" \
+            --arg url_x "${BASE}/Microbridge-x86_64-apple-darwin.app.tar.gz" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"darwin-aarch64": {signature: $sig_a, url: $url_a}, "darwin-x86_64": {signature: $sig_x, url: $url_x}}}' \
+            > release-assets/latest.json
+          echo "Wrote latest.json:"
+          cat release-assets/latest.json
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
