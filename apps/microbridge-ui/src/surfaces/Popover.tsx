@@ -1,6 +1,7 @@
 import type { Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS, elapsed } from "../lib/types";
 import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
+import { visibleThreads } from "../lib/threads";
 import { DeviceEcho } from "../components/DeviceEcho";
 
 const MicroGlyph = ({ color }: { color: string }) => (
@@ -74,16 +75,21 @@ export function Popover({
 }) {
   const t = dark ? DARK : LIGHT;
   const simulator = snapshot.device_name === "mock";
-  const connected = snapshot.device_connected || simulator;
+  const detected =
+    !snapshot.device_connected && snapshot.device_name.includes("usb");
+  const connected = snapshot.device_connected || simulator || detected;
   const chipLabel = snapshot.device_connected
     ? "Connected"
-    : simulator
-      ? "Simulator"
-      : "Disconnected";
+    : detected
+      ? "Detected"
+      : simulator
+        ? "Simulator"
+        : "Disconnected";
   const focused = snapshot.sessions.find(
     (s) => s.id === snapshot.focused_session_id,
   );
   const liveCount = snapshot.agent_key_session_ids.filter(Boolean).length;
+  const { threads, total, truncated } = visibleThreads(snapshot);
 
   const footerButton = (
     label: string,
@@ -223,9 +229,10 @@ export function Popover({
                   style={{ color: t.textMuted }}
                 >
                   {liveCount} on keys
+                  {truncated ? ` · ${threads.length}/${total}` : ""}
                 </span>
               </div>
-              {snapshot.sessions.length === 0 ? (
+              {threads.length === 0 ? (
                 <p
                   className="px-2 py-2 text-[12px]"
                   style={{ color: t.textMuted }}
@@ -233,7 +240,7 @@ export function Popover({
                   No live sessions
                 </p>
               ) : (
-                snapshot.sessions.map((s) => (
+                threads.map((s) => (
                   <div
                     key={s.id}
                     className="flex items-center gap-2 rounded-lg px-2 py-1.5"

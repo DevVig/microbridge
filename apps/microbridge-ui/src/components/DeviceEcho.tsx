@@ -86,7 +86,10 @@ export function DeviceEcho({
   t: ThemeTokens;
   snapshot: Snapshot;
 }) {
-  const connected = snapshot.device_connected || snapshot.device_name === "mock";
+  const connected =
+    snapshot.device_connected ||
+    snapshot.device_name === "mock" ||
+    snapshot.device_name.includes("usb");
   return (
     <div
       className="pointer-events-none flex flex-col items-center gap-2"
@@ -179,9 +182,11 @@ export function DeviceEcho({
       <span className="text-[10px] font-medium" style={{ color: t.textMuted }}>
         {snapshot.device_connected
           ? "Live on your deck · read-only"
-          : snapshot.device_name === "mock"
-            ? "Simulator · read-only"
-            : "Deck offline"}
+          : snapshot.device_name.includes("usb")
+            ? "USB detected · HID map pending"
+            : snapshot.device_name === "mock"
+              ? "Simulator · read-only"
+              : "Deck offline"}
       </span>
     </div>
   );

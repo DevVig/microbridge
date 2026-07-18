@@ -9,12 +9,13 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{info, warn};
 
 /// How recent a file must be (mtime) to be published on the initial scan.
-const INITIAL_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24); // 24h
+const INITIAL_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 12); // 12h
+/// Cap how many journals the initial scan publishes (newest first).
+const INITIAL_MAX_FILES: usize = 24;
 
 /// Spawn a background thread that watches `root` and invokes `on_change`
 /// whenever a matching file is created/modified. Initial scan only includes
-/// files touched within the last 24 hours so historical journals don't flood
-/// the bus.
+/// recent journals (12h, newest 24) so historical sessions don't flood the bus.
 pub fn watch_dir(root: PathBuf, mut on_change: impl FnMut(PathBuf) + Send + 'static) {
     if !root.exists() {
         info!(path = %root.display(), "session dir absent; adapter idle");
@@ -84,17 +85,26 @@ fn scan_recent(root: &Path, on_change: &mut impl FnMut(PathBuf)) {
     let cutoff = SystemTime::now()
         .checked_sub(INITIAL_MAX_AGE)
         .unwrap_or(SystemTime::UNIX_EPOCH);
-    walk_recent(root, cutoff, on_change);
+    let mut files: Vec<(SystemTime, PathBuf)> = Vec::new();
+    collect_recent(root, cutoff, &mut files);
+    files.sort_by_key(|b| std::cmp::Reverse(b.0));
+    for (_, path) in files.into_iter().take(INITIAL_MAX_FILES) {
+        on_change(path);
+    }
 }
 
-fn walk_recent(root: &Path, cutoff: SystemTime, on_change: &mut impl FnMut(PathBuf)) {
+fn collect_recent(root: &Path, cutoff: SystemTime, out: &mut Vec<(SystemTime, PathBuf)>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            walk_recent(&path, cutoff, on_change);
+            // Subagent journals are noise for the menu bar.
+            if path.file_name().and_then(|s| s.to_str()) == Some("subagents") {
+                continue;
+            }
+            collect_recent(&path, cutoff, out);
             continue;
         }
         if !is_session_file(&path) {
@@ -107,7 +117,7 @@ fn walk_recent(root: &Path, cutoff: SystemTime, on_change: &mut impl FnMut(PathB
             continue;
         };
         if mtime >= cutoff {
-            on_change(path);
+            out.push((mtime, path));
         }
     }
 }

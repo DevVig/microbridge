@@ -1,90 +1,135 @@
 //! Codex CLI in-process adapter.
 //!
-//! Watches `~/.codex/sessions` for JSON/JSONL session journals and maps
-//! coarse lifecycle fields onto [`mb_protocol::AgentState`]. Action routing
-//! (approve/reject) is logged until the local Codex surface exposes a stable
-//! hook — see the adapter README notes in `docs/adapters.md`.
+//! Watches `~/.codex/sessions` for JSONL rollout journals. Titles come from
+//! `user_message` events (not the last line of the file); state is inferred
+//! from recent `task_*` / approval events.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use mb_protocol::{AgentState, SessionStatus};
 use serde_json::Value;
-use tracing::{debug, warn};
+use tracing::debug;
 
+use crate::title::{clean_title, cwd_basename, looks_like_boilerplate};
 use crate::watch::watch_dir;
 use crate::{AdapterEvent, AdapterTx};
+
+#[derive(Clone, PartialEq, Eq)]
+struct Fingerprint {
+    state: AgentState,
+    title: String,
+}
 
 pub fn spawn_codex_adapter(tx: AdapterTx) {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let root = PathBuf::from(home).join(".codex").join("sessions");
-    let seen: Arc<Mutex<HashMap<String, AgentState>>> = Arc::new(Mutex::new(HashMap::new()));
+    let seen: Arc<Mutex<HashMap<String, Fingerprint>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let seen_cb = Arc::clone(&seen);
     watch_dir(root, move |path| {
         if let Some(session) = parse_codex_session(&path) {
+            let fp = Fingerprint {
+                state: session.state,
+                title: session.title.clone(),
+            };
             let mut map = seen_cb.lock().unwrap();
-            let prev = map.get(&session.id).copied();
-            if prev == Some(session.state) {
+            if map.get(&session.id) == Some(&fp) {
                 return;
             }
-            map.insert(session.id.clone(), session.state);
+            map.insert(session.id.clone(), fp);
             drop(map);
-            debug!(id = %session.id, ?session.state, "codex session");
+            debug!(id = %session.id, ?session.state, title = %session.title, "codex session");
             let _ = tx.send(AdapterEvent::Upsert(session));
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e == "json" || e == "jsonl")
-        {
-            // File removed or unreadable — best-effort bye from filename.
-            if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
-                let sid = format!("codex:{id}");
-                let mut map = seen_cb.lock().unwrap();
-                if map.remove(&sid).is_some() {
-                    let _ = tx.send(AdapterEvent::Remove(sid));
-                }
-            }
         }
     });
 }
 
 fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
     let text = std::fs::read_to_string(path).ok()?;
-    // Prefer last JSON object from jsonl; otherwise whole file.
-    let value = if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-        let last = text.lines().rev().find(|l| !l.trim().is_empty())?;
-        serde_json::from_str::<Value>(last).ok()?
-    } else {
-        serde_json::from_str::<Value>(&text).ok()?
-    };
+    let mut id: Option<String> = None;
+    let mut cwd: Option<String> = None;
+    let mut title: Option<String> = None;
+    let mut state = AgentState::Idle;
 
-    let id_raw = value
-        .get("id")
-        .or_else(|| value.get("session_id"))
-        .or_else(|| value.get("thread_id"))
-        .and_then(|v| v.as_str())
-        .or_else(|| path.file_stem().and_then(|s| s.to_str()))?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("session_meta") => {
+                let payload = value.get("payload").unwrap_or(&value);
+                if let Some(raw) = payload.get("id").and_then(|v| v.as_str()) {
+                    id = Some(raw.to_string());
+                }
+                if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
+                    cwd = Some(c.to_string());
+                }
+            }
+            Some("event_msg") => {
+                let payload = value.get("payload").unwrap_or(&Value::Null);
+                match payload.get("type").and_then(|v| v.as_str()) {
+                    Some("user_message") => {
+                        if let Some(msg) = payload.get("message").and_then(|v| v.as_str()) {
+                            if !looks_like_boilerplate(msg) && title.is_none() {
+                                title = Some(clean_title(msg, 72));
+                            }
+                        }
+                    }
+                    Some("task_started") => state = AgentState::Working,
+                    Some("task_complete") => state = AgentState::Done,
+                    Some("turn_aborted") => state = AgentState::Error,
+                    Some(other) if other.contains("approval") || other.contains("permission") => {
+                        state = AgentState::AwaitingApproval;
+                    }
+                    Some("agent_reasoning") => {
+                        if matches!(state, AgentState::Idle | AgentState::Done) {
+                            state = AgentState::Thinking;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("response_item") => {
+                let payload = value.get("payload").unwrap_or(&Value::Null);
+                if payload.get("type").and_then(|v| v.as_str()) == Some("message")
+                    && payload.get("role").and_then(|v| v.as_str()) == Some("user")
+                {
+                    if let Some(content) = payload.get("content").and_then(|v| v.as_array()) {
+                        for part in content {
+                            if part.get("type").and_then(|v| v.as_str()) == Some("input_text") {
+                                if let Some(msg) = part.get("text").and_then(|v| v.as_str()) {
+                                    if !looks_like_boilerplate(msg) && title.is_none() {
+                                        title = Some(clean_title(msg, 72));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 
-    let title = value
-        .get("title")
-        .or_else(|| value.get("summary"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let id_raw = id.or_else(|| {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+    })?;
 
-    let state = map_state(&value);
-    let updated_at_ms = value
-        .get("updated_at_ms")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            value
-                .get("updated_at")
-                .and_then(|v| v.as_str())
-                .and_then(parse_iso_ms)
-        })
-        .unwrap_or_else(now_ms);
+    let title = title
+        .filter(|t| !t.is_empty())
+        .or_else(|| cwd.as_deref().map(cwd_basename))
+        .unwrap_or_else(|| "Codex session".into());
+
+    let updated_at_ms = file_mtime_ms(path).unwrap_or_else(now_ms);
 
     Some(SessionStatus {
         id: format!("codex:{id_raw}"),
@@ -95,32 +140,11 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
     })
 }
 
-fn map_state(value: &Value) -> AgentState {
-    let raw = value
-        .get("state")
-        .or_else(|| value.get("status"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("idle")
-        .to_ascii_lowercase();
-
-    match raw.as_str() {
-        "thinking" | "reasoning" => AgentState::Thinking,
-        "working" | "running" | "in_progress" | "active" => AgentState::Working,
-        "awaiting_approval" | "awaiting_input" | "needs_approval" | "approval" => {
-            AgentState::AwaitingApproval
-        }
-        "done" | "completed" | "complete" | "finished" => AgentState::Done,
-        "error" | "failed" => AgentState::Error,
-        "idle" | "ready" => AgentState::Idle,
-        other => {
-            warn!(state = other, "unknown codex state; treating as idle");
-            AgentState::Idle
-        }
-    }
-}
-
-fn parse_iso_ms(_s: &str) -> Option<u64> {
-    None
+fn file_mtime_ms(path: &std::path::Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?;
+    let dur = modified.duration_since(SystemTime::UNIX_EPOCH).ok()?;
+    Some(dur.as_millis() as u64)
 }
 
 fn now_ms() -> u64 {
@@ -134,11 +158,37 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use std::io::Write;
 
     #[test]
-    fn maps_awaiting_approval() {
-        let v = json!({"status": "awaiting_input"});
-        assert_eq!(map_state(&v), AgentState::AwaitingApproval);
+    fn parses_user_message_and_task_state() {
+        let dir = tempfile_dir();
+        let path = dir.join("rollout.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"abc-123","cwd":"/Users/me/dev/AIhero"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"event_msg","payload":{{"type":"user_message","message":"Build the AIhero menu bar pet"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"event_msg","payload":{{"type":"task_started","turn_id":"t1"}}}}"#
+        )
+        .unwrap();
+        let session = parse_codex_session(&path).unwrap();
+        assert_eq!(session.id, "codex:abc-123");
+        assert_eq!(session.title, "Build the AIhero menu bar pet");
+        assert_eq!(session.state, AgentState::Working);
+    }
+
+    fn tempfile_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mb-codex-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
     }
 }

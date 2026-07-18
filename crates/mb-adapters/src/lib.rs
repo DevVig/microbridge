@@ -5,6 +5,7 @@
 
 mod claude;
 mod codex;
+mod title;
 mod watch;
 
 use mb_protocol::SessionStatus;
