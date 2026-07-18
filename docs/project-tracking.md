@@ -1,17 +1,26 @@
 # Project tracking
 
-## Linear
+**Source of truth: Linear team VIGDEV**, project **Microbridge Production Launch**.
 
-Intended team/project: **VIGDEV** / **Microbridge Production Launch**
-(Phase A → 2026-07-21, Phase B from 2026-07-22).
+GitHub milestones/issues were a temporary stand-in and have been closed. Do not
+re-open them for planning.
 
-Linear MCP/API was not available in the agent environment that created this
-release train. Until Linear is wired, use GitHub milestones on this repo:
+## Bootstrap / recreate Linear project
 
-| Milestone | Scope |
-|---|---|
-| [Phase A](https://github.com/DevVig/microbridge/milestone/1) | Software productionization (public, brew, signed DMG, OSS hardening) |
-| [Phase B](https://github.com/DevVig/microbridge/milestone/2) | Device HID — issues labeled `Blocked Dependency` until Micro arrives |
+1. Create a personal API key: https://linear.app/settings/api  
+2. Run:
 
-Mirror issues into Linear when the MCP/API key is available; keep the same
-titles and phase split.
+```sh
+LINEAR_API_KEY=lin_api_... node scripts/bootstrap-linear-project.mjs
+```
+
+That creates the project, marks Phase A items Done (already shipped in `v0.1.0`),
+leaves the native action pipeline open, and files Phase B HID issues with
+`Blocked Dependency` until the Micro arrives (2026-07-22).
+
+## Phases
+
+| Phase | Window | Focus |
+|---|---|---|
+| A | → 2026-07-21 | Public software release (mostly shipped) |
+| B | from 2026-07-22 | Real Micro HID |
