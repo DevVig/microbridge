@@ -21,6 +21,7 @@ use crate::{AdapterEvent, AdapterTx};
 struct Fingerprint {
     state: AgentState,
     title: String,
+    app: String,
 }
 
 pub fn spawn_claude_adapter(tx: AdapterTx) {
@@ -61,6 +62,7 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
                 let fp = Fingerprint {
                     state: session.state,
                     title: session.title.clone(),
+                    app: session.app.clone(),
                 };
                 let mut map = seen_cb.lock().unwrap();
                 if map.get(&session.id) == Some(&fp) {
@@ -80,6 +82,11 @@ fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
     let mut id: Option<String> = None;
     let mut title: Option<String> = None;
     let mut state = AgentState::Idle;
+    // Host discriminators, both already present in the journal we're reading —
+    // no extra I/O. `entrypoint` separates the CLI/desktop from SDK-embedded
+    // hosts; `cwd` names the host when it runs under a known host home.
+    let mut entrypoint: Option<String> = None;
+    let mut cwd: Option<String> = None;
 
     for line in text.lines() {
         let line = line.trim();
@@ -96,6 +103,13 @@ fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
             .and_then(|v| v.as_str())
         {
             id.get_or_insert_with(|| sid.to_string());
+        }
+
+        if let Some(ep) = value.get("entrypoint").and_then(|v| v.as_str()) {
+            entrypoint.get_or_insert_with(|| ep.to_string());
+        }
+        if let Some(c) = value.get("cwd").and_then(|v| v.as_str()) {
+            cwd.get_or_insert_with(|| c.to_string());
         }
 
         let msg = value.get("message").cloned().unwrap_or(Value::Null);
@@ -141,11 +155,53 @@ fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
 
     Some(SessionStatus {
         id: format!("claude:{id_raw}"),
-        app: "Claude Code".into(),
+        app: claude_app_label(entrypoint.as_deref(), cwd.as_deref()),
         title,
         state,
         updated_at_ms,
     })
+}
+
+/// Truthful host label for a Claude-SDK session journal.
+///
+/// The `~/.claude/projects` store is shared by the interactive CLI, Claude
+/// Desktop, and every app that embeds the Claude Agent SDK (Synara, T3 Code,
+/// …), so a hardcoded "Claude Code" mislabels the SDK hosts. `entrypoint`
+/// separates the categories; for SDK-embedded sessions we name the host from
+/// `cwd` when it runs under a known host home, else fall back to the honest
+/// generic label. Everything is derived from fields already in the journal —
+/// no process inspection, no extra I/O.
+fn claude_app_label(entrypoint: Option<&str>, cwd: Option<&str>) -> String {
+    match entrypoint {
+        Some("cli") => "Claude Code".into(),
+        Some("claude-desktop") => "Claude Desktop".into(),
+        Some(ep) if ep.starts_with("sdk") => {
+            host_from_cwd(cwd).unwrap_or("Claude Agent SDK").into()
+        }
+        // Missing/unknown entrypoint: keep the historical default.
+        _ => "Claude Code".into(),
+    }
+}
+
+/// Map a session `cwd` to the embedding host when it lives under that host's
+/// home directory. Purely path-based, so it names the host for worktree
+/// sessions without touching the host at all.
+fn host_from_cwd(cwd: Option<&str>) -> Option<&'static str> {
+    let cwd = cwd?;
+    let home = std::env::var("HOME").ok()?;
+    // (home-relative dir, display name) — extend as more SDK hosts appear.
+    const HOSTS: &[(&str, &str)] = &[
+        (".synara", "Synara"),
+        (".t3", "T3 Code"),
+        (".cursor", "Cursor"),
+    ];
+    for (dir, name) in HOSTS {
+        let prefix = format!("{home}/{dir}/");
+        if cwd.starts_with(&prefix) {
+            return Some(name);
+        }
+    }
+    None
 }
 
 fn extract_text(value: &Value) -> Option<String> {
@@ -223,5 +279,42 @@ mod tests {
         let session = parse_claude_session(&path).unwrap();
         assert_eq!(session.id, "claude:s1");
         assert_eq!(session.title, "Wire the menu bar tray icon");
+        // No entrypoint in the journal → historical default.
+        assert_eq!(session.app, "Claude Code");
+    }
+
+    #[test]
+    fn labels_host_from_entrypoint_and_cwd() {
+        // Interactive CLI and the desktop app are named directly.
+        assert_eq!(claude_app_label(Some("cli"), None), "Claude Code");
+        assert_eq!(
+            claude_app_label(Some("claude-desktop"), None),
+            "Claude Desktop"
+        );
+
+        // SDK-embedded host with no locating cwd → honest generic label,
+        // never a false "Claude Code".
+        assert_eq!(
+            claude_app_label(Some("sdk-ts"), Some("/Users/me/dev/repo")),
+            "Claude Agent SDK"
+        );
+        assert_eq!(claude_app_label(Some("sdk-cli"), None), "Claude Agent SDK");
+
+        // SDK-embedded host running under a known host home → named host.
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            claude_app_label(
+                Some("sdk-ts"),
+                Some(&format!("{home}/.synara/worktrees/Foo"))
+            ),
+            "Synara"
+        );
+        assert_eq!(
+            claude_app_label(Some("sdk-cli"), Some(&format!("{home}/.t3/worktrees/Bar"))),
+            "T3 Code"
+        );
+
+        // Missing entrypoint stays back-compatible.
+        assert_eq!(claude_app_label(None, None), "Claude Code");
     }
 }
