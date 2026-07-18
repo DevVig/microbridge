@@ -57,24 +57,35 @@ class Microbridge < Formula
 
     # INSTALL.md ships inside the daemon archive when present.
     doc.install "INSTALL.md" if File.exist?("INSTALL.md")
-  end
 
-  def post_install
-    apps = Pathname.new(Dir.home)/"Applications"
-    apps.mkpath
-    dest = apps/"Microbridge.app"
-    marker = dest/".microbridge-brew"
-    if dest.exist? && !marker.exist?
-      ohai "Leaving existing ~/Applications/Microbridge.app in place (not brew-managed)"
-      return
-    end
-    rm_r dest if dest.exist?
-    cp_r prefix/"Microbridge.app", dest
-    marker.write "owned-by-homebrew\n"
+    # Homebrew sandboxes formula post_install and forbids writes to $HOME.
+    # The launch-agent runs in the user's session, so this wrapper performs the
+    # marker-guarded app copy immediately before starting the daemon.
+    service_script = libexec/"microbridge-service"
+    service_script.write <<~SH
+      #!/bin/sh
+      set -eu
+      source_app="#{opt_prefix}/Microbridge.app"
+      apps_dir="${HOME}/Applications"
+      dest="${apps_dir}/Microbridge.app"
+      marker="${dest}/.microbridge-brew"
+      /bin/mkdir -p "${apps_dir}"
+      if [ -e "${dest}" ] && [ ! -f "${marker}" ]; then
+        echo "Microbridge: preserving unowned ${dest}" >&2
+      else
+        if [ -e "${dest}" ]; then
+          /bin/rm -rf "${dest}"
+        fi
+        /usr/bin/ditto "${source_app}" "${dest}"
+        /usr/bin/touch "${marker}"
+      fi
+      exec "#{opt_bin}/microbridged"
+    SH
+    service_script.chmod 0755
   end
 
   service do
-    run [opt_bin/"microbridged"]
+    run [opt_libexec/"microbridge-service"]
     keep_alive true
     log_path var/"log/microbridge.log"
     error_log_path var/"log/microbridge.log"
@@ -90,11 +101,12 @@ class Microbridge < Formula
         Status:  microbridgectl status
         Config:  ~/.microbridge/
 
-      Open the app once (or add Login Items) so the menu bar icon appears:
+      Start the service once to install the marker-owned app, then open it:
+        brew services start microbridge
         open ~/Applications/Microbridge.app
 
-      Hardware LEDs/keys need a connected Codex Micro (HID packing landing
-      after device captures). Until then the UI shows Simulator / Detected.
+      Hardware LEDs/keys need a connected Codex Micro and explicit consent in
+      Microbridge Settings → Device → Enable hardware control.
 
       Upgrade:  brew update && brew upgrade microbridge
     EOS
@@ -102,6 +114,6 @@ class Microbridge < Formula
 
   test do
     assert_match "Usage", shell_output("#{bin}/microbridgectl help")
-    assert_predicate prefix/"Microbridge.app", :exist?
+    assert_path_exists prefix/"Microbridge.app"
   end
 end
