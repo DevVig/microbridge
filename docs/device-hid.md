@@ -8,7 +8,7 @@ Firmware changes may invalidate this document — treat it as a living map.
 
 | Capability | Status |
 |---|---|
-| USB open / claim | stub — opens as disconnected until VID/PID confirmed |
+| USB open / claim | presence probe on macOS (`system_profiler`); claim deferred until VID/PID + report map confirmed |
 | LED frames (6 Agent Keys) | mock logs frames; HID packing TBD |
 | Key / dial / joystick input | trait defined (`DeviceInput`); no live reports yet |
 | Bluetooth | out of scope for M2 (USB-first) |

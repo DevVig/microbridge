@@ -82,7 +82,9 @@ Sample unit: [`scripts/microbridge.service`](scripts/microbridge.service).
 
 ## Install from a GitHub Release (binaries)
 
-When a `v*` tag is published, CI attaches platform archives:
+When a `v*` tag is published, CI attaches platform archives (daemon +
+arch-specific `Microbridge.app` for `aarch64-apple-darwin` /
+`x86_64-apple-darwin`):
 
 ```sh
 ./scripts/install-from-release.sh          # latest

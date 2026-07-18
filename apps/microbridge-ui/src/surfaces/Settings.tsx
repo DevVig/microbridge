@@ -372,7 +372,13 @@ export function Settings({
 
             <p className="mt-6 text-[11px]" style={{ color: t.textMuted }}>
               Device: {snapshot.device_name}
-              {snapshot.device_connected ? " · connected" : " · not connected"}
+              {snapshot.device_connected
+                ? " · connected"
+                : snapshot.device_name.includes("usb")
+                  ? " · USB detected (HID map pending)"
+                  : snapshot.device_name === "mock"
+                    ? " · simulator"
+                    : " · not connected"}
               {" · "}zero network
             </p>
           </section>

@@ -46,11 +46,17 @@ jobs:
           path: ${{ env.ASSET }}
 
   build-ui-macos:
-    name: build menu bar app (macos)
+    name: build menu bar app (${{ matrix.target }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "apps/microbridge-ui/src-tauri -> target"
@@ -63,12 +69,12 @@ jobs:
         working-directory: apps/microbridge-ui
         run: |
           npm ci
-          npm run tauri build -- --bundles app
+          npm run tauri build -- --bundles app --target ${{ matrix.target }}
       - name: Package .app
         run: |
-          APP="$(find apps/microbridge-ui/src-tauri/target/release/bundle/macos -name 'Microbridge.app' -type d | head -n1)"
+          APP="$(find apps/microbridge-ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos apps/microbridge-ui/src-tauri/target/release/bundle/macos -name 'Microbridge.app' -type d 2>/dev/null | head -n1)"
           test -n "$APP"
-          STAGE="microbridge-ui-${GITHUB_REF_NAME}-macos"
+          STAGE="microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "staging/${STAGE}"
           cp -R "$APP" "staging/${STAGE}/"
           cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
@@ -76,7 +82,7 @@ jobs:
           echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
         with:
-          name: ui-macos
+          name: ui-${{ matrix.target }}
           path: ${{ env.ASSET }}
 
   publish:

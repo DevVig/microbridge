@@ -102,10 +102,13 @@ EOF
   launchctl enable "gui/$(id -u)/${LABEL}"
   launchctl kickstart -k "gui/$(id -u)/${LABEL}"
 
-  UI_ASSET="microbridge-ui-${TAG}-macos.tar.gz"
+  UI_ASSET="microbridge-ui-${TAG}-${TARGET}.tar.gz"
   UI_URL="https://github.com/${REPO}/releases/download/${TAG}/${UI_ASSET}"
+  # Backward-compatible fallback for older releases that shipped a single asset.
+  UI_FALLBACK="microbridge-ui-${TAG}-macos.tar.gz"
   echo "==> Downloading menu bar app $UI_URL"
-  if curl -fsSL -o "$TMP/$UI_ASSET" "$UI_URL"; then
+  if curl -fsSL -o "$TMP/$UI_ASSET" "$UI_URL" \
+    || curl -fsSL -o "$TMP/$UI_ASSET" "https://github.com/${REPO}/releases/download/${TAG}/${UI_FALLBACK}"; then
     tar -xzf "$TMP/$UI_ASSET" -C "$TMP"
     APP_SRC="$(find "$TMP" -name 'Microbridge.app' -type d | head -n1 || true)"
     if [[ -n "$APP_SRC" ]]; then
