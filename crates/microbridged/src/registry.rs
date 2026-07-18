@@ -45,7 +45,7 @@ impl Registry {
     /// 1. pinned_focus if still alive
     /// 2. awaiting_approval preempts (when approvals_interrupt)
     /// 3. current focus keeps the deck while it exists
-    /// 4. frontmost app's most recent session (auto-follow stub via config)
+    /// 4. frontmost app's most recent session (auto-follow via watcher)
     /// 5. most recently updated session
     pub fn resolve_focus(&mut self, config: &DaemonConfig) {
         if let Some(pin) = &config.pinned_focus {

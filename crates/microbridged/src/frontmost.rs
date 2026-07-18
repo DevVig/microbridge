@@ -1,9 +1,10 @@
 //! Frontmost application tracking for the `focused_app` key source.
 //!
 //! macOS: reads `NSWorkspace.frontmostApplication` on a short cadence and
-//! pushes changes onto the bus. A CFRunLoop notification observer can replace
-//! the poll later; the important property is that the daemon (not the UI)
-//! owns this signal so `--no-ui` still works.
+//! pushes changes onto the bus. This is an intentional, documented exception to
+//! the “no timers” footprint ideal — a CFRunLoop notification observer can
+//! replace the poll later. The daemon (not the UI) owns this signal so
+//! `--no-ui` still auto-follows.
 
 use tokio::sync::mpsc;
 

@@ -406,12 +406,12 @@ export function Settings({
                 {
                   name: "Cursor",
                   kind: "Community",
-                  note: "scaffold — adapters/cursor",
+                  note: "scaffold only — not production (adapters/cursor)",
                 },
                 {
                   name: "T3 Code",
                   kind: "Community",
-                  note: "scaffold — adapters/t3code",
+                  note: "scaffold only — not production (adapters/t3code)",
                 },
               ].map((a) => (
                 <li

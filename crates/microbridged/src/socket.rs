@@ -1,5 +1,6 @@
 //! Unix domain socket server for adapters and UI clients.
 
+use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use mb_protocol::{ClientMessage, ClientRole, ServerMessage, PROTOCOL_VERSION};
@@ -15,9 +16,12 @@ pub async fn serve(shared: SharedState) -> std::io::Result<()> {
     let path = socket_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        // Keep the config dir private; the socket itself is locked to 0600 below.
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     info!(
         socket = %path.display(),
         protocol = PROTOCOL_VERSION,

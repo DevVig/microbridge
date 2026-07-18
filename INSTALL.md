@@ -89,12 +89,15 @@ arch-specific menu bar app). On macOS, releases also include a
 
 ```sh
 ./scripts/install-from-release.sh          # latest (prefers DMG on macOS)
-./scripts/install-from-release.sh v0.0.1
+./scripts/install-from-release.sh v0.1.0
 ```
 
 Or open the DMG from the GitHub Release page and drag Microbridge into
 Applications, then install/start the daemon via Homebrew or the daemon
 archive.
+
+**Note:** Homebrew installs **prebuilt** release binaries (not a from-source
+Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 
 ## Layout after install
 

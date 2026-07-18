@@ -4,7 +4,7 @@
 
 Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; the keys drive agent actions (approve, reject, interrupt, switch focus). No vendor desktop app required.
 
-> **Status: early alpha.** Protocol v0 with UI/control, in-process Codex/Claude watchers, mock device, `microbridgectl`, and a Tauri companion shell. Real HID packing waits on device captures — see [ROADMAP.md](ROADMAP.md).
+> **Status: early public alpha (`v0.1.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. **Real Micro HID packing lands after hardware arrives (target 2026-07-22)** — until then LEDs/keys use Simulator / Detected. See [ROADMAP.md](ROADMAP.md) and [PRIVACY.md](PRIVACY.md).
 
 ## Screenshots
 

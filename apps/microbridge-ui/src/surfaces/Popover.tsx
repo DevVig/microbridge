@@ -74,17 +74,28 @@ export function Popover({
   onQuit: () => void;
 }) {
   const t = dark ? DARK : LIGHT;
-  const simulator = snapshot.device_name === "mock";
+  const demo = snapshot.device_name === "demo-browser";
+  const simulator = snapshot.device_name === "mock" || demo;
   const detected =
     !snapshot.device_connected && snapshot.device_name.includes("usb");
-  const connected = snapshot.device_connected || simulator || detected;
+  // Show the live UI shell in simulator/detected modes; only "Connected"
+  // means claimed HID (not yet shipped for production hardware).
+  const showLiveShell =
+    snapshot.device_connected || simulator || detected;
   const chipLabel = snapshot.device_connected
     ? "Connected"
     : detected
       ? "Detected"
-      : simulator
-        ? "Simulator"
-        : "Disconnected";
+      : demo
+        ? "Demo"
+        : simulator
+          ? "Simulator"
+          : "Disconnected";
+  const chipTone = snapshot.device_connected
+    ? "ok"
+    : detected || simulator
+      ? "warn"
+      : "off";
   const focused = snapshot.sessions.find(
     (s) => s.id === snapshot.focused_session_id,
   );
@@ -140,23 +151,48 @@ export function Popover({
           <span
             className="ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
             style={
-              connected
+              chipTone === "ok"
                 ? { backgroundColor: "#30C4631F", color: "#30C463" }
-                : { backgroundColor: t.hoverBg, color: t.textSecondary }
+                : chipTone === "warn"
+                  ? { backgroundColor: "#F5A62322", color: "#C47F00" }
+                  : { backgroundColor: t.hoverBg, color: t.textSecondary }
             }
           >
             <span
               className="h-[6px] w-[6px] rounded-full"
               style={{
-                backgroundColor: connected ? "#30C463" : t.textMuted,
-                boxShadow: connected ? "0 0 5px #30C463" : "none",
+                backgroundColor:
+                  chipTone === "ok"
+                    ? "#30C463"
+                    : chipTone === "warn"
+                      ? "#F5A623"
+                      : t.textMuted,
+                boxShadow:
+                  chipTone === "ok"
+                    ? "0 0 5px #30C463"
+                    : chipTone === "warn"
+                      ? "0 0 5px #F5A623"
+                      : "none",
               }}
             />
             {chipLabel}
           </span>
         </div>
 
-        {connected ? (
+        {(simulator || detected) && (
+          <p
+            className="px-4 pb-2 text-[11px] leading-snug"
+            style={{ color: t.textMuted }}
+          >
+            {demo
+              ? "Browser demo data — start microbridged + the Tauri app for a live bus."
+              : simulator
+                ? "No Micro claimed — LED frames are simulated until HID packing lands."
+                : "USB Micro seen, but HID is not claimed yet (packing pending)."}
+          </p>
+        )}
+
+        {showLiveShell ? (
           <>
             <div className="px-3 pb-3">
               {focused ? (
@@ -285,8 +321,9 @@ export function Popover({
               className="mt-1 max-w-[240px] text-[12px] leading-relaxed"
               style={{ color: t.textSecondary }}
             >
-              Plug in over USB-C or pair over Bluetooth. Your Agent Keys light
-              up the moment a thread goes live.
+              Plug in over USB-C. Real Agent Key LEDs/input land with HID
+              packing (device captures). Until then use Simulator mode or start
+              the daemon to watch sessions.
             </p>
           </div>
         )}
