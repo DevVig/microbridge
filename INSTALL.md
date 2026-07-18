@@ -54,7 +54,7 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 |---|---|
 | macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
 | From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
-| Hardware LEDs | Codex Micro over USB (HID packing still landing — mock works without hardware) |
+| Hardware LEDs | Codex Micro over USB (protocol ready; set `MICROBRIDGE_HID_CLAIM=1` to write) |
 
 ## From source (developers)
 
@@ -120,8 +120,10 @@ brew services restart microbridge
 launchctl kickstart -k "gui/$(id -u)/ai.microbridge.daemon"
 ```
 
-**LEDs stay dark** — HID packing is still best-effort; ChatGPT desktop may
-also own the device.
+**LEDs stay dark** — by default Microbridge only probes USB (Detected). To
+write Agent Key lighting: pause ChatGPT Desktop ownership, then
+`export MICROBRIDGE_HID_CLAIM=1` before starting the daemon. See
+[docs/device-hid.md](docs/device-hid.md).
 
 **Homebrew can’t fetch (private repo)** — `gh auth login`, or set
 `HOMEBREW_GITHUB_API_TOKEN` to a PAT with `repo` scope.

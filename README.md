@@ -4,7 +4,7 @@
 
 Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; the keys drive agent actions (approve, reject, interrupt, switch focus). No vendor desktop app required.
 
-> **Status: early public alpha (`v0.1.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. **Real Micro HID packing lands after hardware arrives (target 2026-07-22)** — until then LEDs/keys use Simulator / Detected. See [ROADMAP.md](ROADMAP.md) and [PRIVACY.md](PRIVACY.md).
+> **Status: early public alpha (`v0.1.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; live LED writes stay opt-in (`MICROBRIDGE_HID_CLAIM=1`) until hardware validation. See [docs/device-hid.md](docs/device-hid.md).
 
 ## Screenshots
 
@@ -71,7 +71,7 @@ Details in [docs/architecture.md](docs/architecture.md). The wire format is spec
 
 ```
 crates/mb-protocol     wire types (serde) — the protocol's source of truth
-crates/mb-device       device abstraction; mock today, HID packing TBD
+crates/mb-device       device abstraction; HID framing + opt-in claim
 crates/mb-adapters     first-party Codex CLI + Claude Code watchers
 crates/microbridged    the daemon: socket server, registry, focus, key source
 crates/microbridgectl  support/debug CLI (`status`)

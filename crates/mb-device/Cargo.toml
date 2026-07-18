@@ -6,6 +6,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["hid"]
+## Open/write the Work Louder vendor HID interface via `hidapi`.
+hid = ["dep:hidapi"]
+
 [dependencies]
 mb-protocol = { path = "../mb-protocol" }
 tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hidapi = { version = "2.6", optional = true }
