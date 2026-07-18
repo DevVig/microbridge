@@ -40,11 +40,91 @@ const DEMO: Snapshot = {
     pause_leds: false,
     appearance: "system",
     lighting_preset: "codex",
-    state_colors: {},
+    state_colors: {
+      idle: "#E9E9E6",
+      thinking: "#3D7EFF",
+      working: "#3D7EFF",
+      awaiting_approval: "#FFB000",
+      done: "#30C463",
+      error: "#FF453A",
+    },
+    adapters: {
+      codex: { enabled: true },
+      claude: { enabled: true },
+      cursor: { enabled: false },
+      t3code: { enabled: false },
+    },
+    hardware_control_enabled: false,
     brightness: 80,
     sleep_minutes: 3,
     frontmost_app: null,
   },
+  adapters: [
+    {
+      id: "codex",
+      display_name: "Codex CLI",
+      kind: "native",
+      state: "connected",
+      capabilities: {
+        lifecycle_observation: true,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Built-in lifecycle watcher is active.",
+    },
+    {
+      id: "claude",
+      display_name: "Claude Code",
+      kind: "native",
+      state: "connected",
+      capabilities: {
+        lifecycle_observation: true,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Built-in lifecycle watcher is active.",
+    },
+    {
+      id: "cursor",
+      display_name: "Cursor",
+      kind: "community",
+      state: "disabled",
+      capabilities: {
+        lifecycle_observation: false,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Disabled until you explicitly enable this integration.",
+    },
+    {
+      id: "t3code",
+      display_name: "T3 Code",
+      kind: "community",
+      state: "disabled",
+      capabilities: {
+        lifecycle_observation: false,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Disabled until you explicitly enable this integration.",
+    },
+  ],
 };
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
@@ -68,6 +148,28 @@ export function isDemoSnapshot(snapshot: Snapshot): boolean {
 export async function setConfig(config: DaemonConfig): Promise<DaemonConfig> {
   const next = await invoke<DaemonConfig>("set_config", { config });
   return next ?? config;
+}
+
+export async function setAdapterEnabled(adapterId: string, enabled: boolean): Promise<string> {
+  const message = await invoke<string>("set_adapter_enabled", { adapterId, enabled });
+  if (message === null) throw new Error("Adapter controls require the Microbridge app.");
+  return message;
+}
+
+export async function pairAdapter(adapterId: string, pairingUrl: string): Promise<string> {
+  const message = await invoke<string>("pair_adapter", { adapterId, pairingUrl });
+  if (message === null) throw new Error("Pairing requires the Microbridge app.");
+  return message;
+}
+
+export async function forgetAdapter(adapterId: string): Promise<string> {
+  const message = await invoke<string>("forget_adapter", { adapterId });
+  if (message === null) throw new Error("Adapter controls require the Microbridge app.");
+  return message;
+}
+
+export async function fitPopover(contentHeight: number): Promise<void> {
+  await invoke("fit_popover", { contentHeight });
 }
 
 export async function openSettings(): Promise<void> {

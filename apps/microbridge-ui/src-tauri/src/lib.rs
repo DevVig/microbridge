@@ -3,22 +3,256 @@
 
 mod bus;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bus::{apply_event, spawn_bus_loop, BusHandle, CachedSnapshot};
-use mb_protocol::{BusEvent, DaemonConfig, ServerMessage, Snapshot};
+use mb_protocol::{BusEvent, ClientMessage, DaemonConfig, ServerMessage, Snapshot};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, Position, Size, WebviewWindow,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow,
 };
 use tokio::sync::Mutex;
 
 struct AppState {
     bus: BusHandle,
     snapshot: CachedSnapshot,
+}
+
+const CURSOR_PLUGIN_NAME: &str = "microbridge";
+const CURSOR_PLUGIN_MARKER: &str = ".microbridge-owned";
+static CURSOR_PLUGIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn validate_cursor_plugin(path: &Path) -> Result<(), String> {
+    let manifest_path = path.join(".cursor-plugin/plugin.json");
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("read {}: {e}", manifest_path.display()))?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest)
+        .map_err(|e| format!("parse {}: {e}", manifest_path.display()))?;
+    if manifest.get("name").and_then(|value| value.as_str()) != Some(CURSOR_PLUGIN_NAME) {
+        return Err(format!(
+            "{} is not the Microbridge Cursor integration",
+            path.display()
+        ));
+    }
+    for relative in ["hooks/hooks.json", "hooks/microbridge-event.mjs", "hooks/event.mjs"] {
+        if !path.join(relative).is_file() {
+            return Err(format!("Cursor integration is missing {relative}"));
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|e| format!("create {}: {e}", destination.display()))?;
+    for entry in fs::read_dir(source).map_err(|e| format!("read {}: {e}", source.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target)
+                .map_err(|e| format!("copy {}: {e}", target.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn cursor_plugin_source(app: &AppHandle) -> Result<PathBuf, String> {
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("cursor-plugin");
+    if validate_cursor_plugin(&bundled).is_ok() {
+        return Ok(bundled);
+    }
+
+    // `tauri dev` reads the repository copy; release bundles use Resources.
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../adapters/cursor");
+    validate_cursor_plugin(&repository)?;
+    Ok(repository)
+}
+
+fn cursor_plugin_destination() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_string())?;
+    Ok(PathBuf::from(home)
+        .join(".cursor/plugins/local")
+        .join(CURSOR_PLUGIN_NAME))
+}
+
+fn install_cursor_integration(app: &AppHandle) -> Result<PathBuf, String> {
+    let source = cursor_plugin_source(app)?;
+    let destination = cursor_plugin_destination()?;
+    install_cursor_integration_at(
+        &source,
+        &destination,
+        &app.package_info().version.to_string(),
+    )?;
+    Ok(destination)
+}
+
+fn install_cursor_integration_at(
+    source: &Path,
+    destination: &Path,
+    version: &str,
+) -> Result<(), String> {
+    let _operation = CURSOR_PLUGIN_LOCK
+        .lock()
+        .map_err(|_| "Cursor integration installer lock is unavailable".to_string())?;
+    validate_cursor_plugin(source)?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Cursor plugin destination has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+
+    if destination.exists() {
+        if !destination.join(CURSOR_PLUGIN_MARKER).is_file() {
+            return Err(format!(
+                "Preserving unowned Cursor plugin at {}. Move it aside before enabling Microbridge.",
+                destination.display()
+            ));
+        }
+        validate_cursor_plugin(destination)?;
+    }
+
+    let pid = std::process::id();
+    let staging = parent.join(format!(".{CURSOR_PLUGIN_NAME}-installing-{pid}"));
+    let backup = parent.join(format!(".{CURSOR_PLUGIN_NAME}-backup-{pid}"));
+    if staging.exists() {
+        fs::remove_dir_all(&staging)
+            .map_err(|e| format!("remove stale {}: {e}", staging.display()))?;
+    }
+    if backup.exists() {
+        fs::remove_dir_all(&backup)
+            .map_err(|e| format!("remove stale {}: {e}", backup.display()))?;
+    }
+
+    copy_dir(source, &staging)?;
+    fs::write(
+        staging.join(CURSOR_PLUGIN_MARKER),
+        format!("Microbridge {version}\n"),
+    )
+    .map_err(|e| format!("write ownership marker: {e}"))?;
+    validate_cursor_plugin(&staging)?;
+
+    if destination.exists() {
+        fs::rename(destination, &backup)
+            .map_err(|e| format!("prepare Cursor integration update: {e}"))?;
+    }
+    if let Err(error) = fs::rename(&staging, destination) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, destination);
+        }
+        return Err(format!("install Cursor integration: {error}"));
+    }
+    if backup.exists() {
+        fs::remove_dir_all(&backup)
+            .map_err(|e| format!("remove old Cursor integration: {e}"))?;
+    }
+    Ok(())
+}
+
+fn remove_cursor_integration() -> Result<bool, String> {
+    let destination = cursor_plugin_destination()?;
+    remove_cursor_integration_at(&destination)
+}
+
+fn remove_cursor_integration_at(destination: &Path) -> Result<bool, String> {
+    let _operation = CURSOR_PLUGIN_LOCK
+        .lock()
+        .map_err(|_| "Cursor integration installer lock is unavailable".to_string())?;
+    if !destination.exists() {
+        return Ok(false);
+    }
+    if !destination.join(CURSOR_PLUGIN_MARKER).is_file() {
+        return Err(format!(
+            "Preserving unowned Cursor plugin at {}. Remove it manually if that is intended.",
+            destination.display()
+        ));
+    }
+    validate_cursor_plugin(destination)?;
+    fs::remove_dir_all(destination)
+        .map_err(|e| format!("remove {}: {e}", destination.display()))?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod cursor_integration_tests {
+    use super::*;
+
+    #[test]
+    fn installs_updates_and_removes_only_the_microbridge_plugin() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "microbridge-cursor-installer-{}-{nonce}",
+            std::process::id()
+        ));
+        let destination = root.join("local/microbridge");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../adapters/cursor");
+
+        install_cursor_integration_at(&source, &destination, "0.2.1").unwrap();
+        validate_cursor_plugin(&destination).unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join(CURSOR_PLUGIN_MARKER)).unwrap(),
+            "Microbridge 0.2.1\n"
+        );
+
+        install_cursor_integration_at(&source, &destination, "0.2.2").unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join(CURSOR_PLUGIN_MARKER)).unwrap(),
+            "Microbridge 0.2.2\n"
+        );
+        assert!(remove_cursor_integration_at(&destination).unwrap());
+        assert!(!destination.exists());
+        assert!(!remove_cursor_integration_at(&destination).unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn preserves_an_unowned_cursor_plugin() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "microbridge-unowned-cursor-plugin-{}-{nonce}",
+            std::process::id()
+        ));
+        let destination = root.join("local/microbridge");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../adapters/cursor");
+        copy_dir(&source, &destination).unwrap();
+
+        assert!(install_cursor_integration_at(&source, &destination, "0.2.1").is_err());
+        assert!(!destination.join(CURSOR_PLUGIN_MARKER).exists());
+        assert!(remove_cursor_integration_at(&destination).is_err());
+        assert!(destination.join(".cursor-plugin/plugin.json").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+fn sync_cursor_integration(app: &AppHandle, synced: &AtomicBool, enabled: bool) {
+    if !enabled {
+        synced.store(false, Ordering::Relaxed);
+        return;
+    }
+    if !synced.swap(true, Ordering::Relaxed) && install_cursor_integration(app).is_err() {
+        // Retry on the next daemon snapshot or config event. Settings reports
+        // explicit installation errors to the user.
+        synced.store(false, Ordering::Relaxed);
+    }
 }
 
 fn physical_tray_rect(rect: &tauri::Rect, scale: f64) -> (f64, f64, f64, f64) {
@@ -47,7 +281,10 @@ fn position_below_tray(window: &WebviewWindow, tray_x: f64, tray_y: f64, tray_w:
         x = x.clamp(min_x + 8.0, max_x - 8.0);
     }
     let y = (tray_y + tray_h + 6.0).round() as i32;
-    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x.round() as i32, y)));
+    let _ = window.set_position(Position::Physical(PhysicalPosition::new(
+        x.round() as i32,
+        y,
+    )));
 }
 
 fn toggle_popover(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
@@ -116,6 +353,146 @@ async fn set_config(
     Ok(next)
 }
 
+#[tauri::command]
+async fn set_adapter_enabled(
+    adapter_id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let was_enabled = state
+        .snapshot
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|snapshot| snapshot.config.adapters.get(&adapter_id))
+        .map(|preference| preference.enabled)
+        .unwrap_or(false);
+    let message = state
+        .bus
+        .adapter_operation(ClientMessage::SetAdapterEnabled {
+            adapter_id: adapter_id.clone(),
+            enabled,
+        })
+        .await?;
+    if adapter_id == "cursor" && enabled {
+        match install_cursor_integration(&app) {
+            Ok(path) => {
+                return Ok(format!(
+                    "{message} Cursor integration installed from Microbridge at {}. Reload Cursor once if it is already open.",
+                    path.display()
+                ));
+            }
+            Err(error) => {
+                if !was_enabled {
+                    let _ = state
+                        .bus
+                        .adapter_operation(ClientMessage::SetAdapterEnabled {
+                            adapter_id: adapter_id.clone(),
+                            enabled: false,
+                        })
+                        .await;
+                }
+                return Err(format!("Cursor was not enabled because its bundled integration could not be installed: {error}"));
+            }
+        }
+    }
+    Ok(message)
+}
+
+#[tauri::command]
+async fn pair_adapter(
+    adapter_id: String,
+    pairing_url: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .bus
+        .adapter_operation(ClientMessage::PairAdapter {
+            adapter_id,
+            pairing_url,
+        })
+        .await
+}
+
+#[tauri::command]
+async fn forget_adapter(
+    adapter_id: String,
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let was_enabled = state
+        .snapshot
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|snapshot| snapshot.config.adapters.get(&adapter_id))
+        .map(|preference| preference.enabled)
+        .unwrap_or(false);
+    let removed = if adapter_id == "cursor" {
+        remove_cursor_integration()?
+    } else {
+        false
+    };
+    let operation = state
+        .bus
+        .adapter_operation(ClientMessage::ForgetAdapter {
+            adapter_id: adapter_id.clone(),
+        })
+        .await;
+    let message = match operation {
+        Ok(message) => message,
+        Err(error) => {
+            if removed {
+                let _ = install_cursor_integration(&app);
+            }
+            if was_enabled {
+                let _ = state
+                    .bus
+                    .adapter_operation(ClientMessage::SetAdapterEnabled {
+                        adapter_id: adapter_id.clone(),
+                        enabled: true,
+                    })
+                    .await;
+            }
+            return Err(format!("Adapter removal failed and the prior state was restored: {error}"));
+        }
+    };
+    if adapter_id == "cursor" && removed {
+        return Ok(format!(
+            "{message} The bundled Cursor integration was removed. Reload Cursor once if it is already open."
+        ));
+    }
+    Ok(message)
+}
+
+/// Fit the popover to its measured card while leaving a safety margin at the
+/// bottom of the active display. The frontend gives only Threads the overflow.
+#[tauri::command]
+fn fit_popover(content_height: f64, app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("popover")
+        .ok_or_else(|| "popover window unavailable".to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let current_size = window.outer_size().map_err(|e| e.to_string())?;
+    let current_position = window.outer_position().map_err(|e| e.to_string())?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "active monitor unavailable".to_string())?;
+    let monitor_bottom = i64::from(monitor.position().y) + i64::from(monitor.size().height);
+    let safety_margin = (24.0 * scale).round() as i64;
+    let available =
+        (monitor_bottom - i64::from(current_position.y) - safety_margin).max(180) as u32;
+    let desired = (content_height.max(180.0) * scale).round() as u32;
+    window
+        .set_size(Size::Physical(PhysicalSize::new(
+            current_size.width,
+            desired.min(available),
+        )))
+        .map_err(|e| e.to_string())
+}
+
 /// Show the settings window (and hide the popover). Shared by the `open_settings`
 /// command and the tray right-click menu.
 fn show_settings_window(app: &AppHandle) {
@@ -156,7 +533,7 @@ fn quit_ui(app: AppHandle) {
 }
 
 /// Install channel of the running app. Homebrew drops a `.microbridge-brew`
-/// marker at the bundle root (see the formula's `post_install`); its absence
+/// marker at the bundle root (installed by the formula's service wrapper); its absence
 /// means a DMG/manual install. The in-app self-updater only replaces `direct`
 /// installs — brew copies are routed to `brew upgrade` so the formula version
 /// and the on-disk bundle never drift apart.
@@ -215,6 +592,8 @@ pub fn run() {
             let snap_for_loop = Arc::clone(&snapshot);
             let hud_gen_loop = Arc::clone(&hud_generation);
             let handle = app.handle().clone();
+            let cursor_integration_synced = Arc::new(AtomicBool::new(false));
+            let cursor_sync_loop = Arc::clone(&cursor_integration_synced);
 
             tauri::async_runtime::spawn(async move {
                 let mut last_focus: Option<String> = None;
@@ -222,6 +601,13 @@ pub fn run() {
                 while let Some(msg) = event_rx.recv().await {
                     match msg {
                         ServerMessage::Snapshot { snapshot: s } => {
+                            let cursor_enabled = s
+                                .config
+                                .adapters
+                                .get("cursor")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
                             last_focus = s.focused_session_id.clone();
                             saw_snapshot = true;
                             *snap_for_loop.lock().await = Some(s.clone());
@@ -229,13 +615,28 @@ pub fn run() {
                         }
                         ServerMessage::Event { event } => {
                             // Ignore reconnect "offline" noise before first snapshot.
-                            if !saw_snapshot {
-                                if matches!(
+                            if !saw_snapshot
+                                && matches!(
                                     &event,
-                                    BusEvent::DeviceChanged { connected: false, .. }
-                                ) {
-                                    continue;
-                                }
+                                    BusEvent::DeviceChanged {
+                                        connected: false,
+                                        ..
+                                    }
+                                )
+                            {
+                                continue;
+                            }
+                            if let BusEvent::ConfigChanged { config } = &event {
+                                let cursor_enabled = config
+                                    .adapters
+                                    .get("cursor")
+                                    .map(|preference| preference.enabled)
+                                    .unwrap_or(false);
+                                sync_cursor_integration(
+                                    &handle,
+                                    &cursor_sync_loop,
+                                    cursor_enabled,
+                                );
                             }
                             let focus_changed = matches!(&event, BusEvent::FocusChanged { .. });
                             let mut guard = snap_for_loop.lock().await;
@@ -255,6 +656,12 @@ pub fn run() {
                             }
                         }
                         ServerMessage::Config { config } => {
+                            let cursor_enabled = config
+                                .adapters
+                                .get("cursor")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
                             let mut guard = snap_for_loop.lock().await;
                             if let Some(s) = guard.as_mut() {
                                 s.config = config;
@@ -274,6 +681,7 @@ pub fn run() {
             // template image so macOS tints it for light/dark menu bars. The full
             // app icon is an opaque squircle and would appear as a black blob here.
             let tray_icon = tauri::include_image!("icons/tray.png");
+            let last_left_click_ms = Arc::new(AtomicU64::new(0));
 
             // Right-click context menu. Left-click still toggles the popover
             // (`show_menu_on_left_click(false)` keeps the menu on right-click only).
@@ -310,7 +718,7 @@ pub fn run() {
                     "quit" => app.exit(0),
                     _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
+                .on_tray_icon_event(move |tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
@@ -318,6 +726,14 @@ pub fn run() {
                         ..
                     } = event
                     {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let previous = last_left_click_ms.swap(now, Ordering::Relaxed);
+                        if now.saturating_sub(previous) < 180 {
+                            return;
+                        }
                         let app = tray.app_handle();
                         let scale = app
                             .get_webview_window("popover")
@@ -353,6 +769,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             set_config,
+            set_adapter_enabled,
+            pair_adapter,
+            forget_adapter,
+            fit_popover,
             open_settings,
             close_settings,
             hide_popover,

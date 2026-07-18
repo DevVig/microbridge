@@ -53,8 +53,8 @@ Updates:
 
 ```sh
 brew update && brew upgrade microbridge
-brew services restart microbridge   # if the formula changed
-open ~/Applications/Microbridge.app # refreshed on upgrade via post_install
+brew services restart microbridge   # apply formula changes and refresh the marker-owned app
+open ~/Applications/Microbridge.app
 ```
 
 Optional background updates (Homebrew’s own updater):

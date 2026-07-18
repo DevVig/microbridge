@@ -10,9 +10,9 @@ Firmware changes may invalidate this document — treat it as a living map.
 |---|---|
 | USB identity (VID/PID) | **known** — from ChatGPT Desktop `@worklouder/wl-device-kit` |
 | USB presence probe | macOS `system_profiler` matches VID `0x303A` + known PIDs (Detected) |
-| HID claim / LED write | opt-in: build with `hid` feature (default) + `MICROBRIDGE_HID_CLAIM=1` |
+| HID claim / LED write | opt-in: build with `hid` feature (default) + Device → Hardware control; `MICROBRIDGE_HID_CLAIM=1` is a diagnostic override |
 | LED frames (6 Agent Keys) | packed as JSON-RPC `v.oai.thstatus` over framed HID reports |
-| Key / dial / joystick input | notify parsers ready (`v.oai.hid` / `v.oai.rad`); key id map TBD on hardware |
+| Key / dial / joystick input | notify parsers and conservative routing map implemented (`v.oai.hid` / `v.oai.rad`); exact codes remain gated on physical capture |
 | Bluetooth | out of scope for M2 (USB-first) |
 
 Without a claimed device the daemon uses [`MockDevice`](../crates/mb-device/src/lib.rs)
@@ -98,7 +98,9 @@ Effects: `off=0`, `solid=1`, `snake=2`, `rainbow=3`, `breath=4`,
 
 ## Claiming the device
 
-Default daemon behavior: **probe only** (Detected). To write LEDs:
+Default daemon behavior: **probe only** (Detected). Enable **Settings → Device
+→ Hardware control** to claim the interface and apply changes immediately.
+For command-line diagnostics:
 
 ```bash
 export MICROBRIDGE_HID_CLAIM=1

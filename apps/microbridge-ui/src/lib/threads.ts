@@ -1,7 +1,5 @@
 import type { SessionStatus, Snapshot } from "./types";
 
-const DEFAULT_LIMIT = 8;
-
 function rank(session: SessionStatus, snapshot: Snapshot, onKeys: Set<string>): number {
   let score = 0;
   if (session.id === snapshot.focused_session_id) score += 1000;
@@ -29,7 +27,6 @@ function rank(session: SessionStatus, snapshot: Snapshot, onKeys: Set<string>): 
 /** Threads shown in the menu bar popover — focused / on keys / active first. */
 export function visibleThreads(
   snapshot: Snapshot,
-  limit = DEFAULT_LIMIT,
 ): { threads: SessionStatus[]; total: number; truncated: boolean } {
   const onKeys = new Set(
     snapshot.agent_key_session_ids.filter((id): id is string => Boolean(id)),
@@ -39,7 +36,7 @@ export function visibleThreads(
     if (diff !== 0) return diff;
     return b.updated_at_ms - a.updated_at_ms;
   });
-  const threads = ranked.slice(0, limit);
+  const threads = ranked;
   return {
     threads,
     total: snapshot.sessions.length,

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import type { DaemonConfig, Snapshot } from "../lib/types";
-import { STATE_COLORS, STATE_LABELS } from "../lib/types";
+import type { AdapterCapabilities, DaemonConfig, Snapshot, StateColors } from "../lib/types";
+import {
+  CODEX_PALETTE,
+  PHOSPHOR_PALETTE,
+  STATE_COLORS,
+  STATE_LABELS,
+} from "../lib/types";
 import { DARK, LIGHT } from "../lib/theme";
 import {
   appVersion,
@@ -15,6 +20,26 @@ import {
   DeviceTwin,
   type ControlId,
 } from "../components/DeviceTwin";
+import { forgetAdapter, pairAdapter, setAdapterEnabled } from "../lib/bus";
+
+const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
+  { id: "idle", label: "Idle" },
+  { id: "thinking", label: "Thinking" },
+  { id: "working", label: "Working" },
+  { id: "awaiting_approval", label: "Needs approval" },
+  { id: "done", label: "Complete" },
+  { id: "error", label: "Error" },
+];
+
+const CAPABILITIES: { id: keyof AdapterCapabilities; label: string }[] = [
+  { id: "lifecycle_observation", label: "Live state" },
+  { id: "approval_acceptance", label: "Approve" },
+  { id: "approval_rejection", label: "Reject" },
+  { id: "interrupt", label: "Interrupt" },
+  { id: "new_session", label: "New session" },
+  { id: "focus_open", label: "Open" },
+  { id: "reasoning_effort", label: "Effort" },
+];
 
 const KEY_SOURCES: {
   id: DaemonConfig["key_source"];
@@ -75,11 +100,30 @@ export function Settings({
   const [version, setVersion] = useState<string | null>(null);
   const [channel, setChannel] = useState<UpdateChannel | null>(null);
   const [autoCheck, setAutoCheck] = useState<boolean>(() => autoCheckEnabled());
+  const [pairingUrl, setPairingUrl] = useState("");
+  const [adapterMessage, setAdapterMessage] = useState<string | null>(null);
+  const [adapterBusy, setAdapterBusy] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     void appVersion().then(setVersion);
     void updateChannel().then(setChannel);
   }, []);
+
+  const runAdapterOperation = async (adapterId: string, work: () => Promise<string>) => {
+    setAdapterBusy((current) => new Set(current).add(adapterId));
+    setAdapterMessage(null);
+    try {
+      setAdapterMessage(await work());
+    } catch (error) {
+      setAdapterMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAdapterBusy((current) => {
+        const next = new Set(current);
+        next.delete(adapterId);
+        return next;
+      });
+    }
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "keys", label: "Keys" },
@@ -140,7 +184,8 @@ export function Settings({
                 style={{ color: t.textSecondary }}
               >
                 Click a control on the twin to inspect it. Agent Keys show the
-                live thread; command bindings land with HID.
+                live thread; commands route only when hardware control is enabled
+                and the focused adapter advertises the action.
               </p>
               <div className="mt-5 flex justify-center lg:justify-start">
                 <DeviceTwin
@@ -305,8 +350,7 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Device</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Appearance, lighting, and sleep. Zero network — local socket + USB
-              only.
+              Appearance, lighting, and sleep. Device control stays on this Mac.
             </p>
 
             <h2 className="mt-5 text-[13px] font-semibold">Appearance</h2>
@@ -333,32 +377,91 @@ export function Settings({
             </div>
 
             <h2 className="mt-5 text-[13px] font-semibold">Lighting</h2>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
-                style={{
-                  backgroundColor: t.panel,
-                  border: `1px solid ${t.hairline}`,
-                }}
-                onClick={() => onConfig({ ...cfg, lighting_preset: "codex" })}
-              >
-                Codex defaults
-              </button>
-              <button
-                type="button"
-                className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
-                style={{
-                  backgroundColor: t.panel,
-                  border: `1px solid ${t.hairline}`,
-                }}
-                onClick={() =>
-                  onConfig({ ...cfg, lighting_preset: "phosphor" })
-                }
-              >
-                Phosphor
-              </button>
+            <p className="mt-1 max-w-2xl text-[11px] leading-relaxed" style={{ color: t.textMuted }}>
+              Lighting maps agent lifecycle states to the Agent Key LEDs. Codex Defaults is the
+              recommended palette, Phosphor is a warmer alternate, and Custom lets you choose each
+              state color. Changes apply immediately and persist on this Mac.
+            </p>
+            <div className="mt-3 grid max-w-2xl grid-cols-3 gap-2">
+              {[
+                { id: "codex" as const, label: "Codex Defaults", palette: CODEX_PALETTE },
+                { id: "phosphor" as const, label: "Phosphor", palette: PHOSPHOR_PALETTE },
+                { id: "custom" as const, label: "Custom", palette: cfg.state_colors },
+              ].map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="rounded-xl p-3 text-left text-[12px] font-medium"
+                  style={{
+                    backgroundColor: cfg.lighting_preset === preset.id ? t.hoverBg : t.panel,
+                    border: `1px solid ${cfg.lighting_preset === preset.id ? t.textSecondary : t.hairline}`,
+                  }}
+                  onClick={() => onConfig({ ...cfg, lighting_preset: preset.id })}
+                >
+                  <span className="block">{preset.label}</span>
+                  <span className="mt-2 flex gap-1">
+                    {Object.values(preset.palette).map((color, index) => (
+                      <span key={`${color}-${index}`} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+                    ))}
+                  </span>
+                </button>
+              ))}
             </div>
+
+            {cfg.lighting_preset === "custom" && (
+              <div className="mt-3 grid max-w-2xl grid-cols-2 gap-2 sm:grid-cols-3">
+                {LIGHTING_STATES.map((state) => (
+                  <label
+                    key={state.id}
+                    className="flex items-center gap-2 rounded-xl px-3 py-2 text-[11px]"
+                    style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+                  >
+                    <input
+                      type="color"
+                      value={cfg.state_colors[state.id]}
+                      onChange={(event) =>
+                        onConfig({
+                          ...cfg,
+                          lighting_preset: "custom",
+                          state_colors: { ...cfg.state_colors, [state.id]: event.target.value.toUpperCase() },
+                        })
+                      }
+                      className="h-6 w-8 border-0 bg-transparent"
+                    />
+                    {state.label}
+                  </label>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              className="mt-3 rounded-lg px-3 py-1.5 text-[11px] font-medium"
+              style={{ backgroundColor: t.panel, border: `1px solid ${t.hairline}` }}
+              onClick={() =>
+                onConfig({ ...cfg, lighting_preset: "codex", state_colors: CODEX_PALETTE })
+              }
+            >
+              Reset to Codex Defaults
+            </button>
+
+            <h2 className="mt-6 text-[13px] font-semibold">Hardware control</h2>
+            <label className="mt-2 flex max-w-2xl items-start gap-2 text-[12.5px]">
+              <input
+                type="checkbox"
+                checked={cfg.hardware_control_enabled}
+                onChange={(event) =>
+                  onConfig({ ...cfg, hardware_control_enabled: event.target.checked })
+                }
+                className="mt-0.5"
+              />
+              <span>
+                Claim the Codex Micro for keys, dial, joystick, and lighting
+                <span className="mt-0.5 block text-[11px]" style={{ color: t.textMuted }}>
+                  Off by default to avoid competing with another device owner. Changes apply
+                  immediately.
+                </span>
+              </span>
+            </label>
 
             <label className="mt-5 block text-[12.5px]">
               Brightness ({cfg.brightness}%)
@@ -393,11 +496,11 @@ export function Settings({
               {snapshot.device_connected
                 ? " · connected"
                 : snapshot.device_name.includes("usb")
-                  ? " · USB detected (HID map pending)"
+                  ? " · USB detected; hardware control disabled or interface busy"
                   : snapshot.device_name === "mock"
                     ? " · simulator"
                     : " · not connected"}
-              {" · "}zero network
+              {" · "}local USB control
             </p>
           </section>
         )}
@@ -406,58 +509,150 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Adapters</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              First-party adapters run in-process. Community adapters speak
-              NDJSON on the local socket.
+              Cursor ships inside Microbridge and installs locally with one
+              click. Community describes ownership, not readiness. State and
+              capabilities below are live.
             </p>
-            <ul className="mt-4 space-y-2">
-              {[
-                {
-                  name: "Codex CLI",
-                  kind: "Native",
-                  note: "watches ~/.codex/sessions",
-                },
-                {
-                  name: "Claude Code",
-                  kind: "Native",
-                  note: "watches ~/.claude/projects",
-                },
-                {
-                  name: "Cursor",
-                  kind: "Community",
-                  note: "scaffold only — not production (adapters/cursor)",
-                },
-                {
-                  name: "T3 Code",
-                  kind: "Community",
-                  note: "scaffold only — not production (adapters/t3code)",
-                },
-              ].map((a) => (
+            {adapterMessage && (
+              <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
+                {adapterMessage}
+              </p>
+            )}
+            <ul className="mt-4 space-y-3">
+              {snapshot.adapters.map((adapter) => (
                 <li
-                  key={a.name}
-                  className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                  key={adapter.id}
+                  className="rounded-xl px-3 py-3"
                   style={{
                     backgroundColor: t.panel,
                     border: `1px solid ${t.hairline}`,
                   }}
                 >
-                  <div>
-                    <div className="text-[12.5px] font-medium">{a.name}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 text-[12.5px] font-medium">
+                        {adapter.display_name}
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[9.5px] capitalize"
+                          style={{ backgroundColor: t.hoverBg, color: t.textSecondary }}
+                        >
+                          {adapter.kind}
+                        </span>
+                      </div>
                     <div
-                      className="text-[11px]"
+                      className="mt-1 text-[11px]"
                       style={{ color: t.textSecondary }}
                     >
-                      {a.note}
+                        {adapter.diagnostic}
+                      </div>
                     </div>
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-medium capitalize"
+                      style={{
+                        backgroundColor:
+                          adapter.state === "connected" ? "#30C4631F" : adapter.state === "error" ? "#FF453A1F" : t.hoverBg,
+                        color:
+                          adapter.state === "connected" ? "#30A653" : adapter.state === "error" ? "#D93A32" : t.textSecondary,
+                      }}
+                    >
+                      {adapter.state.replace("_", " ")}
+                    </span>
                   </div>
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: t.hoverBg,
-                      color: t.textSecondary,
-                    }}
-                  >
-                    {a.kind}
-                  </span>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {CAPABILITIES.map((capability) => (
+                      <span
+                        key={capability.id}
+                        className="rounded-full px-2 py-0.5 text-[9.5px]"
+                        style={{
+                          backgroundColor: adapter.capabilities[capability.id] ? "#30C46316" : t.hoverBg,
+                          color: adapter.capabilities[capability.id] ? "#278B48" : t.textMuted,
+                        }}
+                      >
+                        {adapter.capabilities[capability.id] ? "✓ " : "— "}{capability.label}
+                      </span>
+                    ))}
+                  </div>
+                  {adapter.id === "t3code" && adapter.state !== "disabled" && (
+                    <div className="mt-3 flex max-w-xl gap-2">
+                      <input
+                        type="password"
+                        value={pairingUrl}
+                        onChange={(event) => setPairingUrl(event.target.value)}
+                        placeholder="Paste one-time T3 Code pairing link"
+                        className="min-w-0 flex-1 rounded-lg px-3 py-1.5 text-[11px]"
+                        style={{ backgroundColor: t.sunken, border: `1px solid ${t.hairline}` }}
+                      />
+                      <button
+                        type="button"
+                        disabled={!pairingUrl.trim() || adapterBusy.has(adapter.id)}
+                        className="rounded-lg px-3 py-1.5 text-[11px] font-medium disabled:opacity-40"
+                        style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
+                        onClick={() =>
+                          void runAdapterOperation(adapter.id, async () => {
+                            const message = await pairAdapter(adapter.id, pairingUrl.trim());
+                            setPairingUrl("");
+                            return message;
+                          })
+                        }
+                      >
+                        Pair
+                      </button>
+                    </div>
+                  )}
+                  <div className="mt-3 flex gap-2">
+                    {adapter.kind === "community" && !cfg.adapters[adapter.id]?.enabled && (
+                      <button
+                        type="button"
+                        disabled={adapterBusy.has(adapter.id)}
+                        className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
+                        style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
+                        onClick={() =>
+                          void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, true))
+                        }
+                      >
+                        {adapter.id === "cursor" ? "Enable Cursor" : "Enable integration"}
+                      </button>
+                    )}
+                    {adapter.kind === "community" && cfg.adapters[adapter.id]?.enabled && (
+                      <>
+                        {adapter.id === "cursor" && (
+                          <button
+                            type="button"
+                            disabled={adapterBusy.has(adapter.id)}
+                            className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
+                            style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
+                            onClick={() =>
+                              void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, true))
+                            }
+                          >
+                            Repair bundled integration
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={adapterBusy.has(adapter.id)}
+                          className="rounded-lg px-3 py-1.5 text-[11px]"
+                          style={{ border: `1px solid ${t.hairline}`, color: t.textSecondary }}
+                          onClick={() =>
+                            void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, false))
+                          }
+                        >
+                          Disconnect
+                        </button>
+                        <button
+                          type="button"
+                          disabled={adapterBusy.has(adapter.id)}
+                          className="rounded-lg px-3 py-1.5 text-[11px]"
+                          style={{ border: `1px solid ${t.hairline}`, color: t.textSecondary }}
+                          onClick={() =>
+                            void runAdapterOperation(adapter.id, () => forgetAdapter(adapter.id))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -468,8 +663,8 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Updates</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              The daemon stays zero-network. This is the only place Microbridge
-              reaches out — and only when you ask it to.
+              Update checks run only when requested or explicitly enabled. A
+              paired T3 Code adapter contacts only its approved environment.
             </p>
 
             <div

@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use mb_protocol::{ClientMessage, ClientRole, ServerMessage, PROTOCOL_VERSION};
+use mb_protocol::{
+    AdapterCapabilities, AgentState, ClientMessage, ClientRole, ServerMessage, SessionStatus,
+    PROTOCOL_VERSION,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -35,6 +38,7 @@ async fn main() -> ExitCode {
             }
         },
         "hid-capture" => run_hid_capture(args.next()),
+        "cursor-event" => run_cursor_event(args.collect()).await,
         "help" | "-h" | "--help" => {
             print_usage();
             ExitCode::SUCCESS
@@ -48,10 +52,62 @@ async fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    println!("Usage: microbridgectl [status | hid-capture [seconds]]");
+    println!("Usage: microbridgectl [status | hid-capture [seconds] | cursor-event <id> <state> [title]]");
     println!("  status                 print the live bus snapshot as JSON (default)");
     println!("  hid-capture [seconds]  observe raw Codex Micro key/dial/joystick events");
     println!("                         (default 120s; needs the `hid` feature + a device)");
+}
+
+async fn run_cursor_event(args: Vec<String>) -> ExitCode {
+    if !(2..=3).contains(&args.len()) {
+        eprintln!("cursor-event requires <conversation-id> <state> [title]");
+        return ExitCode::FAILURE;
+    }
+    let state = match args[1].as_str() {
+        "idle" | "stop" | "session_end" => AgentState::Idle,
+        "thinking" | "before_submit_prompt" | "after_agent_thought" => AgentState::Thinking,
+        "working" | "pre_tool_use" | "post_tool_use" => AgentState::Working,
+        "awaiting_approval" => AgentState::AwaitingApproval,
+        "done" | "after_agent_response" => AgentState::Done,
+        "error" => AgentState::Error,
+        other => {
+            eprintln!("unsupported cursor lifecycle state: {other}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let session = SessionStatus {
+        id: format!("cursor:{}", args[0]),
+        app: "Cursor".into(),
+        title: args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| "Cursor agent".into()),
+        state,
+        updated_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    };
+    match send_operation(ClientMessage::IngestLifecycle {
+        adapter_id: "cursor".into(),
+        session,
+        ttl_ms: if args[1] == "session_end" {
+            1_000
+        } else {
+            30 * 60 * 1000
+        },
+    })
+    .await
+    {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("microbridgectl cursor-event: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Stream decoded device→host HID events for hardware bring-up.
@@ -100,6 +156,8 @@ async fn fetch_snapshot() -> Result<String, String> {
         adapter: "microbridgectl".into(),
         protocol_version: PROTOCOL_VERSION,
         role: ClientRole::Ui,
+        adapter_version: Some(env!("CARGO_PKG_VERSION").into()),
+        capabilities: AdapterCapabilities::default(),
     };
     write_line(&mut write_half, &hello).await?;
     write_line(&mut write_half, &ClientMessage::Subscribe).await?;
@@ -115,6 +173,35 @@ async fn fetch_snapshot() -> Result<String, String> {
         }
     }
     Err("daemon closed before sending snapshot".into())
+}
+
+async fn send_operation(message: ClientMessage) -> Result<String, String> {
+    let path = socket_path();
+    let stream = UnixStream::connect(&path)
+        .await
+        .map_err(|e| format!("connect {}: {e}", path.display()))?;
+    let (read_half, mut write_half) = stream.into_split();
+    write_line(
+        &mut write_half,
+        &ClientMessage::Hello {
+            adapter: "microbridgectl".into(),
+            protocol_version: PROTOCOL_VERSION,
+            role: ClientRole::Ui,
+            adapter_version: Some(env!("CARGO_PKG_VERSION").into()),
+            capabilities: AdapterCapabilities::default(),
+        },
+    )
+    .await?;
+    write_line(&mut write_half, &message).await?;
+    let mut lines = BufReader::new(read_half).lines();
+    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+        if let ServerMessage::AdapterOperation { ok, message, .. } =
+            serde_json::from_str::<ServerMessage>(&line).map_err(|e| e.to_string())?
+        {
+            return if ok { Ok(message) } else { Err(message) };
+        }
+    }
+    Err("daemon closed before acknowledging event".into())
 }
 
 async fn write_line(

@@ -13,7 +13,8 @@ ci: fmt
 	cargo fmt --all --check
 	$(MAKE) clippy
 	$(MAKE) test
-	cd apps/microbridge-ui && npm ci && npm run build
+	node --test adapters/cursor/hooks/microbridge-event.test.mjs
+	cd apps/microbridge-ui && npm ci && npm test && npm run build
 
 build:
 	cargo build --release -p microbridged -p microbridgectl

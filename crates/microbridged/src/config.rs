@@ -31,7 +31,8 @@ pub fn load_config() -> DaemonConfig {
 pub fn load_config_from(path: &Path) -> DaemonConfig {
     match std::fs::read_to_string(path) {
         Ok(text) => match toml::from_str::<DaemonConfig>(&text) {
-            Ok(config) => {
+            Ok(mut config) => {
+                config.normalize();
                 info!(path = %path.display(), "loaded config");
                 config
             }

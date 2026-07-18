@@ -10,7 +10,9 @@ TAG="${TAG#v}"
 FULL="v${TAG}"
 FORMULA="$ROOT/Formula/microbridge.rb"
 REPO="${MICROBRIDGE_REPO:-DevVig/microbridge}"
-BASE="https://github.com/${REPO}/releases/download/${FULL}"
+# Tests may point at the exact workflow artifacts through a local file:// base.
+# Publication keeps the default public GitHub release base.
+BASE="${MICROBRIDGE_ASSET_BASE:-https://github.com/${REPO}/releases/download/${FULL}}"
 
 sha_of() {
   local url="$1"

@@ -15,9 +15,9 @@ truth; if this document and the types disagree, fix one of them in the same PR.
 
 ## Principles
 
-- **Event-driven only.** Messages are sent on state *transitions*. There are no
-  heartbeats, no keepalives, no polling. Socket liveness is the liveness
-  signal.
+- **Transition-oriented.** Socket adapters send on state transitions. Managed
+  one-shot IDE hooks use expiring lifecycle leases; the paired T3 adapter
+  refreshes its supported orchestration snapshot and emits only changed rows.
 - **Status is a full replacement.** Every `status` carries the complete session
   record; the daemon never merges partial updates.
 - **Adapters never touch the device.** They publish state and receive routed
@@ -30,16 +30,37 @@ truth; if this document and the types disagree, fix one of them in the same PR.
 `hello` accepts an optional `role` (`adapter` default, or `ui`):
 
 ```json
-{"type":"hello","adapter":"reference-echo","protocol_version":0}
+{"type":"hello","adapter":"reference-echo","protocol_version":0,"adapter_version":"1.2.0","capabilities":{"lifecycle_observation":true}}
 {"type":"hello","adapter":"microbridge-ui","protocol_version":0,"role":"ui"}
 ```
+
+Management operations require a completed, protocol-compatible `ui` hello.
+The mode-`0600` socket trusts processes running as the same logged-in user;
+roles provide protocol separation, not isolation between hostile same-user
+processes.
+
+`capabilities` is an object whose canonical boolean keys all default to
+`false`: `lifecycle_observation`, `approval_acceptance`,
+`approval_rejection`, `interrupt`, `new_session`, `focus_open`, and
+`reasoning_effort`. The action mapping is:
+
+| Action | Required capability |
+|---|---|
+| `approve` | `approval_acceptance` |
+| `reject` | `approval_rejection` |
+| `interrupt` | `interrupt` |
+| `new_session` | `new_session` |
+| `open_focused_thread` | `focus_open` |
+| `reasoning_effort_up`, `reasoning_effort_down` | `reasoning_effort` |
+
+Focus navigation is daemon-local and does not require a host capability.
 
 ## Messages: adapter → daemon
 
 ### `hello` — required first message
 
 ```json
-{"type":"hello","adapter":"codex-cli","protocol_version":0}
+{"type":"hello","adapter":"example-host","protocol_version":0,"capabilities":{"lifecycle_observation":true,"interrupt":true}}
 ```
 
 ### `status` — on every session transition
@@ -71,8 +92,10 @@ truth; if this document and the types disagree, fix one of them in the same PR.
 {"type":"action","session_id":"codex:0195fa2e","action":"approve"}
 ```
 
-`action` is one of: `approve` · `reject` · `interrupt` · `new_session` ·
-`cycle_focus`. Adapters should treat unknown actions as a no-op and log them.
+`action` also includes `reasoning_effort_up`, `reasoning_effort_down`,
+`navigate_up`, `navigate_down`, `navigate_left`, `navigate_right`, and
+`open_focused_thread`. The daemon sends a host command only when that adapter
+advertised the corresponding capability. Unknown actions remain a logged no-op.
 
 ## Messages: UI → daemon
 
@@ -92,24 +115,49 @@ truth; if this document and the types disagree, fix one of them in the same PR.
 Config fields include `key_source` (`most_recent` · `focused_app` · `pinned` ·
 `priority` · `custom`), `pinned_focus`, `approvals_interrupt`, `pause_leds`,
 `appearance`, `lighting_preset`, `state_colors`, `brightness`,
-`sleep_minutes`, `frontmost_app`, and key-assignment lists. Persisted at
+`sleep_minutes`, `frontmost_app`, `hardware_control_enabled`, adapter consent,
+and key-assignment lists. Persisted at
 `~/.microbridge/config.toml`.
+
+### Adapter consent and pairing
+
+```json
+{"type":"set_adapter_enabled","adapter_id":"cursor","enabled":true}
+{"type":"pair_adapter","adapter_id":"t3code","pairing_url":"https://…/#token=…"}
+{"type":"forget_adapter","adapter_id":"t3code"}
+```
+
+Pairing tokens are exchanged immediately and are never written to config or
+logs. `adapter_operation` returns a success/failure acknowledgment.
 
 ## Messages: daemon → UI
 
 ### `snapshot`
 
 Full bus view: sessions, focused session, six Agent Key assignments, device
-connection, and config.
+connection, config, and live adapter states/capabilities.
 
 ### `event`
 
 Incremental `BusEvent`: `session_upserted`, `session_removed`,
-`focus_changed`, `agent_keys_changed`, `device_changed`, `config_changed`.
+`focus_changed`, `agent_keys_changed`, `device_changed`, `config_changed`,
+`adapters_changed`.
+
+`adapters_changed` carries the complete live adapter-card list, not an
+invalidation token:
+
+```json
+{"kind":"adapters_changed","adapters":[{"id":"cursor","display_name":"Cursor","kind":"community","state":"limited","capabilities":{"lifecycle_observation":true},"diagnostic":"Lifecycle connected; IDE controls remain unavailable."}]}
+```
+
+Clients replace their current adapter list with this payload. Missing
+capability keys decode as `false`.
 
 ### `config`
 
 Response to `get_config` / ack of `set_config`.
+If persistence fails, the daemon leaves runtime state unchanged and replies
+with `{"type":"config_error","message":"…"}`.
 
 ## Focus policy (daemon-internal)
 

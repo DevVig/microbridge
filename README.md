@@ -2,9 +2,9 @@
 
 **An open-source control plane for the Codex Micro — one macropad, every coding agent.**
 
-Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; the keys drive agent actions (approve, reject, interrupt, switch focus). No vendor desktop app required.
+Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; keys route only the actions each adapter explicitly advertises, so unsupported controls never report false success. No vendor desktop app is required for Microbridge itself.
 
-> **Status: early public alpha (`v0.1.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; live LED writes stay opt-in (`MICROBRIDGE_HID_CLAIM=1`) until hardware validation. See [docs/device-hid.md](docs/device-hid.md).
+> **Status: early public alpha (`v0.2.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. Cursor lifecycle reception and paired T3 Code control are opt-in and capability-gated. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; hardware control stays off until enabled in Device settings (or `MICROBRIDGE_HID_CLAIM=1` is set for diagnostics) while physical validation is completed. See [docs/device-hid.md](docs/device-hid.md).
 
 ## Screenshots
 
@@ -40,10 +40,15 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 
 ## Design principles
 
-1. **Invisible footprint.** Event-driven end to end: no polling loops, no heartbeat timers. Idle CPU is 0.0% and idle RSS targets single-digit megabytes. If Microbridge is noticeable in Activity Monitor, that is a bug — the [footprint budget](docs/architecture.md#footprint-budget) is a spec, not an aspiration.
-2. **Zero-network daemon.** No telemetry, no cloud. The always-resident daemon's only I/O is a local Unix socket and the USB device — it links no HTTP client, auditable in `Cargo.lock`. The menu bar app doesn't phone home either, with one opt-in exception: an update check *you* trigger (or enable to run once at launch). No background polling, no automatic pings.
+1. **Invisible footprint.** Local watchers are event-driven; device input and an explicitly paired T3 connection use bounded polling and backoff. Idle CPU and RSS remain part of the [footprint budget](docs/architecture.md#footprint-budget).
+2. **Local-first and explicit network access.** There is no telemetry or cloud relay. The app checks for updates only when requested or enabled, and the daemon contacts a T3 environment only after the user enables the adapter and supplies a one-time pairing link.
 3. **Rust core, any-language adapters.** The always-resident part is a single static Rust binary. First-party adapters compile into it (in-process, ~zero overhead). Community adapters are separate processes speaking [newline-delimited JSON](docs/protocol.md) — write one in whatever you like.
 4. **The menu bar app is the product UI.** Configure keys, lighting, and adapters there. The daemon keeps the hardware alive underneath; `microbridgectl` is a support/debug escape hatch.
+
+Cursor support is included in the Microbridge app and repository. Enable it
+once in **Settings → Adapters**; Microbridge installs its bundled lifecycle
+integration into Cursor's supported local-plugin directory. There is no
+separate Marketplace download or second product to maintain.
 
 ## Architecture
 

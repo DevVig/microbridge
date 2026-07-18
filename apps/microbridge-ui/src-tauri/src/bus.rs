@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mb_protocol::{
-    BusEvent, ClientMessage, ClientRole, DaemonConfig, ServerMessage, Snapshot, PROTOCOL_VERSION,
+    AdapterCapabilities, BusEvent, ClientMessage, ClientRole, DaemonConfig, ServerMessage,
+    Snapshot, PROTOCOL_VERSION,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -30,6 +31,7 @@ impl BusHandle {
             .await?;
             match read_matching(&mut reader, false, true).await? {
                 ServerMessage::Config { config } => Ok(config),
+                ServerMessage::ConfigError { message } => Err(message),
                 _ => Err("unexpected set_config reply".into()),
             }
         };
@@ -37,6 +39,28 @@ impl BusHandle {
             Ok(result) => result,
             Err(_) => Err("set_config timed out waiting for microbridged".into()),
         }
+    }
+
+    pub async fn adapter_operation(&self, message: ClientMessage) -> Result<String, String> {
+        let work = async {
+            let (mut write, reader) = open_ui_client().await?;
+            write_msg(&mut write, &message).await?;
+            let mut lines = reader.lines();
+            while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if let ServerMessage::AdapterOperation { ok, message, .. } =
+                    serde_json::from_str::<ServerMessage>(&line).map_err(|e| e.to_string())?
+                {
+                    return if ok { Ok(message) } else { Err(message) };
+                }
+            }
+            Err("daemon closed before acknowledging adapter operation".into())
+        };
+        tokio::time::timeout(Duration::from_secs(15), work)
+            .await
+            .map_err(|_| "adapter operation timed out".to_string())?
     }
 }
 
@@ -68,6 +92,8 @@ async fn open_ui_client() -> Result<
             adapter: "microbridge-ui".into(),
             protocol_version: PROTOCOL_VERSION,
             role: ClientRole::Ui,
+            adapter_version: Some(env!("CARGO_PKG_VERSION").into()),
+            capabilities: AdapterCapabilities::default(),
         },
     )
     .await?;
@@ -96,19 +122,16 @@ async fn read_matching(
     want_config: bool,
 ) -> Result<ServerMessage, String> {
     let mut lines = reader.lines();
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .map_err(|e| format!("read: {e}"))?
-    {
+    while let Some(line) = lines.next_line().await.map_err(|e| format!("read: {e}"))? {
         if line.trim().is_empty() {
             continue;
         }
-        let msg: ServerMessage =
-            serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
+        let msg: ServerMessage = serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
         match &msg {
             ServerMessage::Snapshot { .. } if want_snapshot => return Ok(msg),
-            ServerMessage::Config { .. } if want_config => return Ok(msg),
+            ServerMessage::Config { .. } | ServerMessage::ConfigError { .. } if want_config => {
+                return Ok(msg)
+            }
             _ => continue,
         }
     }
@@ -146,7 +169,10 @@ pub fn apply_event(snap: &mut Snapshot, event: BusEvent) {
             snap.device_name = name;
         }
         BusEvent::ConfigChanged { config } => {
-            snap.config = config;
+            snap.config = *config;
+        }
+        BusEvent::AdaptersChanged { adapters } => {
+            snap.adapters = adapters;
         }
     }
 }
@@ -164,23 +190,16 @@ pub fn spawn_bus_loop() -> (BusHandle, mpsc::Receiver<ServerMessage>) {
     (BusHandle {}, rx)
 }
 
-async fn run_subscribe_once(
-    tx: &mpsc::Sender<ServerMessage>,
-) -> Result<(), String> {
+async fn run_subscribe_once(tx: &mpsc::Sender<ServerMessage>) -> Result<(), String> {
     let (mut write, reader) = open_ui_client().await?;
     write_msg(&mut write, &ClientMessage::Subscribe).await?;
 
     let mut lines = reader.lines();
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .map_err(|e| format!("read: {e}"))?
-    {
+    while let Some(line) = lines.next_line().await.map_err(|e| format!("read: {e}"))? {
         if line.trim().is_empty() {
             continue;
         }
-        let msg: ServerMessage =
-            serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
+        let msg: ServerMessage = serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
         if tx.send(msg).await.is_err() {
             break;
         }
