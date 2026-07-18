@@ -214,8 +214,8 @@ jobs:
           name: ui-${{ matrix.target }}
           path: ui-out/*
 
-  publish:
-    name: publish release
+  assemble-assets:
+    name: assemble release assets
     needs: [build, build-ui-macos]
     runs-on: ubuntu-latest
     steps:
@@ -225,9 +225,27 @@ jobs:
           path: artifacts
       - name: Collect assets
         run: |
+          set -euo pipefail
           mkdir -p release-assets
           find artifacts -type f \( -name '*.tar.gz' -o -name '*.dmg' \) -exec cp {} release-assets/ \;
           ls -la release-assets
+      - name: Validate release versions and asset names
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          WORKSPACE_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+          UI_PACKAGE_VERSION="$(jq -r .version apps/microbridge-ui/package.json)"
+          UI_BUNDLE_VERSION="$(jq -r .version apps/microbridge-ui/src-tauri/tauri.conf.json)"
+          test "$VERSION" = "$WORKSPACE_VERSION"
+          test "$VERSION" = "$UI_PACKAGE_VERSION"
+          test "$VERSION" = "$UI_BUNDLE_VERSION"
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            test -f "release-assets/microbridge-${TAG}-${target}.tar.gz"
+            test -f "release-assets/microbridge-ui-${TAG}-${target}.tar.gz"
+            test -f "release-assets/microbridge-ui-${TAG}-${target}.dmg"
+          done
+          shasum -a 256 release-assets/* > release-assets/SHA256SUMS
       - name: Generate updater manifest (latest.json)
         run: |
           set -euo pipefail
@@ -253,12 +271,65 @@ jobs:
             > release-assets/latest.json
           echo "Wrote latest.json:"
           cat release-assets/latest.json
+          test "$(jq -r .version release-assets/latest.json)" = "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: release-assets/*
+
+  formula-smoke-prepublish:
+    name: pre-publish formula smoke (${{ matrix.arch }})
+    needs: assemble-assets
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: release-assets
+      - name: Rewrite formula to exact local workflow assets
+        env:
+          MICROBRIDGE_ASSET_BASE: file://${{ github.workspace }}/release-assets
+        run: |
+          ./scripts/bump-formula.sh "${{ github.ref_name }}"
+          test "$(sed -n 's/  version "\([^"]*\)"/\1/p' Formula/microbridge.rb)" = "${GITHUB_REF_NAME#v}"
+      - name: Install, launch, and remove candidate formula
+        run: ./scripts/smoke-formula.sh Formula/microbridge.rb "${GITHUB_REF_NAME#v}" "${{ matrix.arch }}"
+
+  publish:
+    name: publish prerelease assets
+    needs: [assemble-assets, formula-smoke-prepublish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets-${{ github.ref_name }}
+          path: release-assets
       - uses: softprops/action-gh-release@v3
         with:
+          prerelease: true
           generate_release_notes: true
           files: release-assets/*
           body: |
-            ## Install (macOS)
+            ## Release state
+
+            Signed artifacts are published as a prerelease. This version is not
+            promoted to a final release until the Homebrew formula PR merges and
+            clean public-tap installations pass on Apple Silicon and Intel.
+
+            ## Direct download (prerelease assets available now)
+
+            Signed/notarized app assets are attached to this release.
+
+            ## Homebrew (available after the formula PR merges)
 
             Menu bar app + daemon (not CLI-only):
 
@@ -271,7 +342,7 @@ jobs:
 
             Upgrade later: `brew update && brew upgrade microbridge`
 
-            ### Direct download (signed + notarized DMG)
+            ### Signed + notarized DMG
 
             Grab `microbridge-ui-${{ github.ref_name }}-aarch64-apple-darwin.dmg` (Apple Silicon)
             or `…-x86_64-apple-darwin.dmg` (Intel) from the assets below, open it, and drag
@@ -281,8 +352,8 @@ jobs:
 
             Full guide: [INSTALL.md](INSTALL.md).
 
-  bump-formula:
-    name: bump Homebrew formula
+  prepare-formula:
+    name: prepare Homebrew formula
     needs: publish
     runs-on: ubuntu-latest
     steps:
@@ -295,7 +366,49 @@ jobs:
         run: |
           chmod +x scripts/bump-formula.sh
           ./scripts/bump-formula.sh "${{ github.ref_name }}"
+          test "$(sed -n 's/  version "\([^"]*\)"/\1/p' Formula/microbridge.rb)" = "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: formula-${{ github.ref_name }}
+          path: Formula/microbridge.rb
+
+  formula-smoke-public-assets:
+    name: public-asset formula smoke (${{ matrix.arch }})
+    needs: prepare-formula
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: formula-${{ github.ref_name }}
+          path: candidate
+      - name: Install, launch, and remove candidate formula
+        run: ./scripts/smoke-formula.sh candidate/microbridge.rb "${GITHUB_REF_NAME#v}" "${{ matrix.arch }}"
+
+  bump-formula:
+    name: open Homebrew formula PR
+    needs: [publish, formula-smoke-public-assets]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/download-artifact@v8
+        with:
+          name: formula-${{ github.ref_name }}
+          path: candidate
+      - name: Use smoke-tested formula
+        run: cp candidate/microbridge.rb Formula/microbridge.rb
       - name: Open PR
+        id: formula-pr
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -310,3 +423,23 @@ jobs:
             ```
           branch: chore/brew-${{ github.ref_name }}
           delete-branch: true
+      - name: Publish formula status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## Homebrew publication"
+            echo "Pre-publication and public-asset formula smoke tests passed on Apple Silicon and Intel."
+            echo "Formula PR: ${{ steps.formula-pr.outputs.pull-request-url }}"
+            echo "The release remains a prerelease until that PR merges and clean public installs pass."
+          } >> "$GITHUB_STEP_SUMMARY"
+          BODY_FILE="$RUNNER_TEMP/release-body.md"
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$BODY_FILE"
+          {
+            echo
+            echo "## Homebrew formula PR"
+            echo "${{ steps.formula-pr.outputs.pull-request-url }}"
+            echo
+            echo "Homebrew publication is pending; this release remains a prerelease."
+          } >> "$BODY_FILE"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$BODY_FILE"

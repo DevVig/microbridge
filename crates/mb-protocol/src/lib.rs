@@ -4,6 +4,8 @@
 //! `docs/protocol.md` is the normative spec; these types are its source of
 //! truth — if they disagree, fix one of them in the same PR.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Protocol revision. Bumped on breaking changes; clients announce theirs in
@@ -86,6 +88,18 @@ pub enum LightingPreset {
     Custom,
 }
 
+impl LightingPreset {
+    /// Resolve a named preset to its effective palette. Custom deliberately
+    /// returns `None` so callers preserve the user-selected colors.
+    pub fn colors(self) -> Option<StateColors> {
+        match self {
+            Self::Codex => Some(StateColors::codex()),
+            Self::Phosphor => Some(StateColors::phosphor()),
+            Self::Custom => None,
+        }
+    }
+}
+
 /// Per-state RGB as `#RRGGBB`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateColors {
@@ -127,6 +141,117 @@ impl StateColors {
     }
 }
 
+/// Whether an adapter ships with Microbridge or is managed by its host IDE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterKind {
+    #[default]
+    Native,
+    Community,
+}
+
+/// Truthful runtime state shown in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterConnectionState {
+    #[default]
+    Disabled,
+    NeedsSetup,
+    Connecting,
+    Connected,
+    Limited,
+    Incompatible,
+    Error,
+}
+
+/// Commands and observations an adapter can actually perform in its current
+/// negotiated version. New fields default false for older clients.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AdapterCapabilities {
+    #[serde(default)]
+    pub lifecycle_observation: bool,
+    #[serde(default)]
+    pub approval_acceptance: bool,
+    #[serde(default)]
+    pub approval_rejection: bool,
+    #[serde(default)]
+    pub interrupt: bool,
+    #[serde(default)]
+    pub new_session: bool,
+    #[serde(default)]
+    pub focus_open: bool,
+    #[serde(default)]
+    pub reasoning_effort: bool,
+}
+
+impl AdapterCapabilities {
+    pub fn lifecycle_only() -> Self {
+        Self {
+            lifecycle_observation: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn full_control() -> Self {
+        Self {
+            lifecycle_observation: true,
+            approval_acceptance: true,
+            approval_rejection: true,
+            interrupt: true,
+            new_session: true,
+            focus_open: true,
+            reasoning_effort: true,
+        }
+    }
+
+    pub fn supports(&self, action: Action) -> bool {
+        match action {
+            Action::Approve => self.approval_acceptance,
+            Action::Reject => self.approval_rejection,
+            Action::Interrupt => self.interrupt,
+            Action::NewSession => self.new_session,
+            Action::OpenFocusedThread => self.focus_open,
+            Action::ReasoningEffortUp | Action::ReasoningEffortDown => self.reasoning_effort,
+            Action::CycleFocus
+            | Action::NavigateUp
+            | Action::NavigateDown
+            | Action::NavigateLeft
+            | Action::NavigateRight => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterStatus {
+    pub id: String,
+    pub display_name: String,
+    pub kind: AdapterKind,
+    pub state: AdapterConnectionState,
+    #[serde(default)]
+    pub capabilities: AdapterCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_ms: Option<u64>,
+    #[serde(default)]
+    pub diagnostic: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterPreference {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+pub fn default_adapter_preferences() -> BTreeMap<String, AdapterPreference> {
+    BTreeMap::from([
+        ("codex".into(), AdapterPreference { enabled: true }),
+        ("claude".into(), AdapterPreference { enabled: true }),
+        ("cursor".into(), AdapterPreference { enabled: false }),
+        ("t3code".into(), AdapterPreference { enabled: false }),
+    ])
+}
+
 /// Persistent daemon configuration (`~/.microbridge/config.toml`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonConfig {
@@ -155,6 +280,12 @@ pub struct DaemonConfig {
     pub lighting_preset: LightingPreset,
     #[serde(default)]
     pub state_colors: StateColors,
+    /// Per-host consent. Cursor and T3 Code are disabled until explicitly enabled.
+    #[serde(default = "default_adapter_preferences")]
+    pub adapters: BTreeMap<String, AdapterPreference>,
+    /// Claim and poll the physical HID interface. Off unless explicitly enabled.
+    #[serde(default)]
+    pub hardware_control_enabled: bool,
     /// 0–100
     #[serde(default = "default_brightness")]
     pub brightness: u8,
@@ -189,9 +320,24 @@ impl Default for DaemonConfig {
             appearance: Appearance::System,
             lighting_preset: LightingPreset::Codex,
             state_colors: StateColors::codex(),
+            adapters: default_adapter_preferences(),
+            hardware_control_enabled: false,
             brightness: 80,
             sleep_minutes: 3,
             frontmost_app: None,
+        }
+    }
+}
+
+impl DaemonConfig {
+    /// Normalize legacy and partial config at every trust boundary.
+    pub fn normalize(&mut self) {
+        for (id, preference) in default_adapter_preferences() {
+            self.adapters.entry(id).or_insert(preference);
+        }
+        self.brightness = self.brightness.min(100);
+        if let Some(colors) = self.lighting_preset.colors() {
+            self.state_colors = colors;
         }
     }
 }
@@ -206,6 +352,8 @@ pub struct Snapshot {
     pub device_connected: bool,
     pub device_name: String,
     pub config: DaemonConfig,
+    #[serde(default)]
+    pub adapters: Vec<AdapterStatus>,
 }
 
 /// Incremental bus change for subscribed UI clients.
@@ -217,7 +365,8 @@ pub enum BusEvent {
     FocusChanged { session_id: Option<String> },
     AgentKeysChanged { session_ids: Vec<Option<String>> },
     DeviceChanged { connected: bool, name: String },
-    ConfigChanged { config: DaemonConfig },
+    ConfigChanged { config: Box<DaemonConfig> },
+    AdaptersChanged { adapters: Vec<AdapterStatus> },
 }
 
 /// Client → daemon messages (adapters and UI share the socket).
@@ -230,6 +379,10 @@ pub enum ClientMessage {
         protocol_version: u32,
         #[serde(default)]
         role: ClientRole,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        adapter_version: Option<String>,
+        #[serde(default)]
+        capabilities: AdapterCapabilities,
     },
     /// Full state for one session. Sent on every transition — never on a
     /// timer. The daemon treats each `status` as a complete replacement.
@@ -242,6 +395,22 @@ pub enum ClientMessage {
     GetConfig,
     /// UI: replace config and persist.
     SetConfig { config: DaemonConfig },
+    /// UI: enable or disable one opt-in integration.
+    SetAdapterEnabled { adapter_id: String, enabled: bool },
+    /// UI: pair a T3 Code environment with a one-time pairing URL.
+    PairAdapter {
+        adapter_id: String,
+        pairing_url: String,
+    },
+    /// UI: remove all local credentials and runtime state for an integration.
+    ForgetAdapter { adapter_id: String },
+    /// Managed IDE hook: upsert a lease-backed session without owning a long-lived socket.
+    IngestLifecycle {
+        adapter_id: String,
+        session: SessionStatus,
+        #[serde(default = "default_lifecycle_ttl_ms")]
+        ttl_ms: u64,
+    },
 }
 
 /// Daemon → client messages.
@@ -256,6 +425,13 @@ pub enum ServerMessage {
     Event { event: BusEvent },
     /// Response to GetConfig / acknowledgment of SetConfig.
     Config { config: DaemonConfig },
+    /// A requested config mutation was rejected; existing runtime state is unchanged.
+    ConfigError { message: String },
+    AdapterOperation {
+        adapter_id: String,
+        ok: bool,
+        message: String,
+    },
 }
 
 /// Actions a physical key can trigger on the focused agent.
@@ -267,6 +443,17 @@ pub enum Action {
     Interrupt,
     NewSession,
     CycleFocus,
+    ReasoningEffortUp,
+    ReasoningEffortDown,
+    NavigateUp,
+    NavigateDown,
+    NavigateLeft,
+    NavigateRight,
+    OpenFocusedThread,
+}
+
+fn default_lifecycle_ttl_ms() -> u64 {
+    30 * 60 * 1000
 }
 
 /// Backward-compatible aliases used by older docs / reference adapter.
@@ -318,6 +505,8 @@ mod tests {
             adapter: "microbridge-ui".into(),
             protocol_version: 0,
             role: ClientRole::Ui,
+            adapter_version: None,
+            capabilities: AdapterCapabilities::default(),
         };
         let json = serde_json::to_string(&hello).unwrap();
         assert!(json.contains(r#""role":"ui""#));
@@ -330,10 +519,52 @@ mod tests {
                 device_connected: false,
                 device_name: "mock".into(),
                 config: DaemonConfig::default(),
+                adapters: vec![],
             },
         };
         let round =
             serde_json::from_str::<ServerMessage>(&serde_json::to_string(&snap).unwrap()).unwrap();
         assert_eq!(round, snap);
+    }
+
+    #[test]
+    fn legacy_config_gets_adapter_and_hardware_defaults() {
+        let config: DaemonConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.adapters["codex"].enabled);
+        assert!(!config.adapters["cursor"].enabled);
+        assert!(!config.hardware_control_enabled);
+    }
+
+    #[test]
+    fn named_lighting_presets_resolve_their_palette() {
+        assert_eq!(LightingPreset::Codex.colors(), Some(StateColors::codex()));
+        assert_eq!(
+            LightingPreset::Phosphor.colors(),
+            Some(StateColors::phosphor())
+        );
+        assert_eq!(LightingPreset::Custom.colors(), None);
+    }
+
+    #[test]
+    fn normalize_applies_named_palette_and_preserves_custom_colors() {
+        let mut named = DaemonConfig {
+            lighting_preset: LightingPreset::Phosphor,
+            state_colors: StateColors::codex(),
+            ..DaemonConfig::default()
+        };
+        named.normalize();
+        assert_eq!(named.state_colors, StateColors::phosphor());
+
+        let custom_colors = StateColors {
+            idle: "#010101".into(),
+            ..StateColors::codex()
+        };
+        let mut custom = DaemonConfig {
+            lighting_preset: LightingPreset::Custom,
+            state_colors: custom_colors.clone(),
+            ..DaemonConfig::default()
+        };
+        custom.normalize();
+        assert_eq!(custom.state_colors, custom_colors);
     }
 }

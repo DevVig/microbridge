@@ -11,6 +11,7 @@ use tracing::{info, warn};
 
 use crate::config::socket_path;
 use crate::state::{next_conn_id, SharedState};
+use crate::t3code;
 
 pub async fn serve(shared: SharedState) -> std::io::Result<()> {
     let path = socket_path();
@@ -98,54 +99,304 @@ async fn apply(
             adapter,
             protocol_version,
             role: hello_role,
+            adapter_version,
+            capabilities,
         } => {
+            if *named {
+                warn!(conn_id, "duplicate hello ignored");
+                return;
+            }
+            if protocol_version != PROTOCOL_VERSION {
+                warn!(
+                    adapter,
+                    protocol_version, "client speaks a different protocol revision"
+                );
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id: adapter,
+                    ok: false,
+                    message: format!(
+                        "Protocol {protocol_version} is incompatible with Microbridge protocol {PROTOCOL_VERSION}."
+                    ),
+                });
+                return;
+            }
             *role = hello_role;
             *named = true;
             let mut state = shared.lock().await;
             match hello_role {
                 ClientRole::Adapter => {
-                    state.adapter_txs.insert(conn_id, tx.clone());
+                    if let Err(error) = state.register_adapter(
+                        conn_id,
+                        adapter.clone(),
+                        adapter_version,
+                        capabilities,
+                        tx.clone(),
+                    ) {
+                        *named = false;
+                        warn!(adapter, %error, "adapter connection requires consent or setup");
+                        let _ = tx.send(ServerMessage::AdapterOperation {
+                            adapter_id: adapter.clone(),
+                            ok: false,
+                            message: error,
+                        });
+                    }
                 }
                 ClientRole::Ui => {
                     state.ui_txs.insert(conn_id, tx.clone());
                 }
             }
-            if protocol_version == PROTOCOL_VERSION {
-                info!(adapter, ?hello_role, conn_id, "client connected");
-            } else {
-                warn!(
-                    adapter,
-                    protocol_version, "client speaks a different protocol revision"
-                );
-            }
+            info!(adapter, ?hello_role, conn_id, "client connected");
         }
         ClientMessage::Status { session } => {
-            if !*named {
-                warn!("status before hello; ignoring");
+            if !*named || *role != ClientRole::Adapter {
+                warn!(
+                    conn_id,
+                    "adapter status without a completed adapter handshake; ignoring"
+                );
                 return;
             }
             let mut state = shared.lock().await;
             state.upsert_session(session, conn_id);
         }
         ClientMessage::Bye { session_id } => {
+            if !*named || *role != ClientRole::Adapter {
+                warn!(
+                    conn_id,
+                    "adapter bye without a completed adapter handshake; ignoring"
+                );
+                return;
+            }
             let mut state = shared.lock().await;
             state.remove_session(&session_id);
         }
         ClientMessage::Subscribe => {
+            if !*named || *role != ClientRole::Ui {
+                warn!(
+                    conn_id,
+                    "subscribe without a completed UI handshake; ignoring"
+                );
+                return;
+            }
             let state = shared.lock().await;
             let snap = state.snapshot();
             let _ = tx.send(ServerMessage::Snapshot { snapshot: snap });
         }
         ClientMessage::GetConfig => {
+            if !*named || *role != ClientRole::Ui {
+                warn!(
+                    conn_id,
+                    "get_config without a completed UI handshake; ignoring"
+                );
+                return;
+            }
             let state = shared.lock().await;
             let _ = tx.send(ServerMessage::Config {
                 config: state.config.clone(),
             });
         }
         ClientMessage::SetConfig { config } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::ConfigError {
+                    message: "set_config requires a completed UI handshake".into(),
+                });
+                return;
+            }
             let mut state = shared.lock().await;
-            state.set_config(config.clone());
-            let _ = tx.send(ServerMessage::Config { config });
+            match state.set_config(config) {
+                Ok(()) => {
+                    let _ = tx.send(ServerMessage::Config {
+                        config: state.config.clone(),
+                    });
+                }
+                Err(message) => {
+                    let _ = tx.send(ServerMessage::ConfigError { message });
+                }
+            }
         }
+        ClientMessage::SetAdapterEnabled {
+            adapter_id,
+            enabled,
+        } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id,
+                    ok: false,
+                    message: "Adapter consent changes require a completed UI handshake.".into(),
+                });
+                return;
+            }
+            let mut state = shared.lock().await;
+            let result = state.set_adapter_enabled(&adapter_id, enabled);
+            let _ = tx.send(ServerMessage::AdapterOperation {
+                adapter_id,
+                ok: result.is_ok(),
+                message: result.err().unwrap_or_else(|| {
+                    if enabled {
+                        "Integration enabled."
+                    } else {
+                        "Integration disabled."
+                    }
+                    .into()
+                }),
+            });
+        }
+        ClientMessage::PairAdapter {
+            adapter_id,
+            pairing_url,
+        } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id,
+                    ok: false,
+                    message: "Adapter pairing requires a completed UI handshake.".into(),
+                });
+                return;
+            }
+            let allowed =
+                adapter_id == "t3code" && shared.lock().await.adapter_enabled(&adapter_id);
+            let result = if adapter_id != "t3code" {
+                Err("This adapter does not use pairing links.".to_string())
+            } else if !allowed {
+                Err("Enable T3 Code before pairing it.".to_string())
+            } else {
+                t3code::pair(&pairing_url)
+                    .await
+                    .map(|_| "Pairing accepted. Microbridge is connecting to T3 Code.".to_string())
+            };
+            if result.is_ok() {
+                shared.lock().await.set_adapter_runtime(
+                    "t3code",
+                    mb_protocol::AdapterConnectionState::Connecting,
+                    t3code::capabilities(),
+                    "Pairing accepted. Loading T3 Code threads…",
+                );
+            }
+            let _ = tx.send(ServerMessage::AdapterOperation {
+                adapter_id,
+                ok: result.is_ok(),
+                message: result.unwrap_or_else(|error| error),
+            });
+        }
+        ClientMessage::ForgetAdapter { adapter_id } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id,
+                    ok: false,
+                    message: "Removing an adapter requires a completed UI handshake.".into(),
+                });
+                return;
+            }
+            let disabled = {
+                let mut state = shared.lock().await;
+                state.set_adapter_enabled(&adapter_id, false)
+            };
+            let result = disabled.and_then(|_| {
+                if adapter_id == "t3code" {
+                    t3code::forget_credential()
+                } else {
+                    Ok(())
+                }
+            });
+            let _ = tx.send(ServerMessage::AdapterOperation {
+                adapter_id,
+                ok: result.is_ok(),
+                message: result
+                    .err()
+                    .unwrap_or_else(|| "Integration removed.".into()),
+            });
+        }
+        ClientMessage::IngestLifecycle {
+            adapter_id,
+            session,
+            ttl_ms,
+        } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id,
+                    ok: false,
+                    message: "Lifecycle hook ingestion requires a completed UI handshake.".into(),
+                });
+                return;
+            }
+            let mut state = shared.lock().await;
+            let result = state.ingest_lifecycle(&adapter_id, session, ttl_ms);
+            let _ = tx.send(ServerMessage::AdapterOperation {
+                adapter_id,
+                ok: result.is_ok(),
+                message: result
+                    .err()
+                    .unwrap_or_else(|| "Lifecycle event accepted.".into()),
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mb_device::MockDevice;
+    use mb_protocol::{AdapterCapabilities, DaemonConfig};
+
+    fn state() -> SharedState {
+        Arc::new(tokio::sync::Mutex::new(crate::state::DaemonState::new(
+            Box::<MockDevice>::default(),
+            DaemonConfig::default(),
+        )))
+    }
+
+    #[tokio::test]
+    async fn adapter_role_cannot_change_consent() {
+        let shared = state();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut role = ClientRole::Adapter;
+        let mut named = true;
+        apply(
+            ClientMessage::SetAdapterEnabled {
+                adapter_id: "cursor".into(),
+                enabled: true,
+            },
+            9,
+            &tx,
+            &mut role,
+            &mut named,
+            &shared,
+        )
+        .await;
+        let ServerMessage::AdapterOperation { ok, message, .. } = rx.recv().await.unwrap() else {
+            panic!("expected adapter-operation rejection");
+        };
+        assert!(!ok);
+        assert!(message.contains("UI handshake"));
+        assert!(!shared.lock().await.adapter_enabled("cursor"));
+    }
+
+    #[tokio::test]
+    async fn incompatible_ui_handshake_gets_no_control_channel() {
+        let shared = state();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut role = ClientRole::Adapter;
+        let mut named = false;
+        apply(
+            ClientMessage::Hello {
+                adapter: "test-ui".into(),
+                protocol_version: PROTOCOL_VERSION + 1,
+                role: ClientRole::Ui,
+                adapter_version: Some("test".into()),
+                capabilities: AdapterCapabilities::default(),
+            },
+            10,
+            &tx,
+            &mut role,
+            &mut named,
+            &shared,
+        )
+        .await;
+        let ServerMessage::AdapterOperation { ok, message, .. } = rx.recv().await.unwrap() else {
+            panic!("expected protocol rejection");
+        };
+        assert!(!ok);
+        assert!(message.contains("incompatible"));
+        assert!(!named);
+        assert!(!shared.lock().await.ui_txs.contains_key(&10));
     }
 }

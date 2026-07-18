@@ -158,7 +158,7 @@ impl Device for MockDevice {
 ///
 /// Without a probed device this behaves like [`MockDevice`] and reports
 /// `connected: false`. Presence (Detected) uses VID/PID from ChatGPT's kit.
-/// Live claim requires `--features hid` and `MICROBRIDGE_HID_CLAIM=1`.
+/// Live claim requires `--features hid` and explicit daemon/UI consent.
 pub struct HidDevice {
     inner: MockDevice,
     /// True only when the vendor HID interface is claimed for writes.
@@ -202,9 +202,14 @@ impl HidDevice {
     /// Attempt to open the first matching USB device. Falls back to
     /// disconnected (mock rendering) when none is found or HID is unavailable.
     ///
-    /// Claim is opt-in (`MICROBRIDGE_HID_CLAIM=1` + `hid` feature) so we do not
-    /// fight ChatGPT Desktop by default.
+    /// Claim is opt-in (`open_with_claim(true)` + `hid` feature) so we do not
+    /// fight another device owner by default. `open()` honors the development
+    /// environment override for command-line diagnostics.
     pub fn open() -> Self {
+        Self::open_with_claim(claim_requested())
+    }
+
+    pub fn open_with_claim(should_claim: bool) -> Self {
         let probe = probe_usb_micro();
         if !probe.present {
             return Self::default();
@@ -223,7 +228,7 @@ impl HidDevice {
             claimed: None,
         };
 
-        if claim_requested() {
+        if should_claim {
             device.try_claim();
         }
         device
@@ -260,9 +265,7 @@ impl HidDevice {
 
     #[cfg(not(feature = "hid"))]
     fn try_claim(&mut self) {
-        tracing::warn!(
-            "MICROBRIDGE_HID_CLAIM set but mb-device built without `hid` feature — Detected only"
-        );
+        tracing::warn!("HID claim requested but mb-device was built without `hid` — Detected only");
     }
 
     fn next_rpc_id(&mut self) -> u32 {
@@ -323,7 +326,7 @@ impl Device for HidDevice {
                 device = %self.name,
                 packets = reports.len(),
                 request = %request,
-                "usb present; packed LED RPC (set MICROBRIDGE_HID_CLAIM=1 to write)"
+                "usb present; packed LED RPC ready (enable Device hardware control to write)"
             );
         }
 
@@ -346,11 +349,40 @@ impl Device for HidDevice {
 #[cfg(feature = "hid")]
 fn notify_to_input(notify: DeviceNotify) -> Option<DeviceInput> {
     match notify {
-        DeviceNotify::Hid { key, .. } => {
-            agent_key_index(&key).map(|index| DeviceInput::AgentKeyPress { index })
-        }
+        DeviceNotify::Hid { key, act, agent } => hid_key_to_input(&key, act, agent),
         DeviceNotify::Joystick { angle, .. } => angle.and_then(joystick_from_angle),
         DeviceNotify::Other { .. } => None,
+    }
+}
+
+#[cfg(feature = "hid")]
+fn hid_key_to_input(key: &str, act: Option<i64>, agent: Option<i64>) -> Option<DeviceInput> {
+    // Ignore explicit release notifications. The aliases below are deliberately
+    // conservative; `hid-capture` remains the authority for firmware revisions.
+    if act == Some(0) {
+        return None;
+    }
+    if let Some(fallback_index) = agent_key_index(key) {
+        // `ag` is the firmware's authoritative zero-based Agent Key index.
+        // The human-readable `k` label has shipped in both agent0..agent5 and
+        // agent1..agent6 forms, so it is only a fallback for older notifies.
+        let index = agent
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value < AGENT_KEY_COUNT)
+            .unwrap_or(fallback_index);
+        return Some(DeviceInput::AgentKeyPress { index });
+    }
+    match key.trim().to_ascii_lowercase().as_str() {
+        "approve" | "accept" | "yes" => Some(DeviceInput::Approve),
+        "reject" | "decline" | "no" => Some(DeviceInput::Reject),
+        "interrupt" | "stop" | "cancel" => Some(DeviceInput::Interrupt),
+        "new" | "new_session" | "new-session" => Some(DeviceInput::NewSession),
+        "cycle" | "focus" | "cycle_focus" => Some(DeviceInput::CycleFocus),
+        "dial_left" | "dial-left" | "dial_ccw" => Some(DeviceInput::DialRotate { delta: -1 }),
+        "dial_right" | "dial-right" | "dial_cw" => Some(DeviceInput::DialRotate { delta: 1 }),
+        "dial" | "dial_press" | "dial-press" => Some(DeviceInput::DialPress),
+        "touch" | "touch_tap" | "touch-tap" => Some(DeviceInput::TouchTap),
+        _ => None,
     }
 }
 
@@ -385,7 +417,13 @@ fn joystick_from_angle(angle: i64) -> Option<DeviceInput> {
 /// Prefer a claimed HID device; else a detected-but-unclaimed USB Micro;
 /// else the mock simulator.
 pub fn open_default_device() -> Box<dyn Device> {
-    let hid = HidDevice::open();
+    open_default_device_with_claim(claim_requested())
+}
+
+/// Open the device with an explicit user-consent value. The environment
+/// override is handled by the daemon before calling this function.
+pub fn open_default_device_with_claim(should_claim: bool) -> Box<dyn Device> {
+    let hid = HidDevice::open_with_claim(should_claim);
     if hid.usb_present() || hid.descriptor().connected {
         Box::new(hid)
     } else {
@@ -422,6 +460,24 @@ mod tests {
         assert_eq!(agent_key_index("agent7"), None);
         assert_eq!(agent_key_index("approve"), None);
         assert_eq!(agent_key_index(""), None);
+    }
+
+    #[cfg(feature = "hid")]
+    #[test]
+    fn hid_agent_field_resolves_ambiguous_key_labels() {
+        assert_eq!(
+            hid_key_to_input("agent1", Some(1), Some(0)),
+            Some(DeviceInput::AgentKeyPress { index: 0 })
+        );
+        assert_eq!(
+            hid_key_to_input("agent1", Some(1), Some(1)),
+            Some(DeviceInput::AgentKeyPress { index: 1 })
+        );
+        assert_eq!(
+            hid_key_to_input("agent6", Some(1), Some(5)),
+            Some(DeviceInput::AgentKeyPress { index: 5 })
+        );
+        assert_eq!(hid_key_to_input("agent6", Some(0), Some(5)), None);
     }
 
     #[test]

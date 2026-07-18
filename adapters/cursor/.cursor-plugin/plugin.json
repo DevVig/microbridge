@@ -1,0 +1,17 @@
+{
+  "name": "microbridge",
+  "displayName": "Microbridge",
+  "version": "0.2.1",
+  "description": "Shows Cursor agent lifecycle state on the Codex Micro through the local Microbridge daemon.",
+  "author": {
+    "name": "DevVig"
+  },
+  "publisher": "DevVig",
+  "homepage": "https://github.com/DevVig/microbridge/tree/main/adapters/cursor",
+  "repository": "https://github.com/DevVig/microbridge",
+  "license": "MIT",
+  "keywords": ["cursor", "hardware", "agent-status", "microbridge"],
+  "category": "developer-tools",
+  "tags": ["hardware", "lifecycle", "local-only"],
+  "hooks": "./hooks/hooks.json"
+}

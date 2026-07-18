@@ -1,28 +1,38 @@
-# cursor adapter (community)
+# Microbridge for Cursor
 
-Out-of-process Microbridge adapter for [Cursor](https://cursor.com/).
+This directory is the Cursor integration bundled with Microbridge. It reports
+agent lifecycle state to the local Microbridge daemon without reading Cursor
+databases, installing global hooks, using Accessibility automation, or creating
+replacement sessions.
 
-## Status
+## Install and consent
 
-**Scaffold.** Cursor does not publish a stable local session journal API.
-This adapter connects and stays idle until a supported state source is
-documented. PRs welcome — see the checklist in
-[docs/adapters.md](../../docs/adapters.md).
+1. Open **Microbridge Settings → Adapters**.
+2. Click **Enable Cursor**. Microbridge installs its bundled integration into
+   Cursor's supported local-plugin directory after this explicit consent.
+3. Reload Cursor once if it is already open. **Remove** disables the adapter
+   and deletes only the Microbridge-owned local plugin directory.
 
-## Rules
+The hook talks directly to `~/.microbridge/microbridged.sock` and sends only the
+conversation id, lifecycle state, and workspace-derived display label. It does
+not depend on `microbridgectl` being on Cursor's PATH. Prompt, response,
+transcript, and tool argument content are not sent.
 
-- Event-driven only (no polling loops)
-- No scraping of Cursor's private Electron internals
-- Prefer official hooks / documented session files when available
+The same source is public here for review and development. A separate
+Marketplace download is not required, and integration updates ship with the
+Microbridge app.
 
-## Run (once implemented)
+## Capability boundary
+
+Lifecycle observation is implemented. Cursor does not currently expose stable
+public APIs for authoritative approval acceptance, session-scoped interrupt,
+opening an existing thread, or reasoning-effort changes. Microbridge therefore
+reports this adapter as **Limited** and never falls back to private storage or
+Accessibility scripting.
+
+Run a hook locally:
 
 ```sh
-cargo run -p microbridged          # shell 1
-node adapters/cursor/index.mjs     # shell 2
+printf '{"conversation_id":"demo","workspace_root":"/tmp/example"}' \
+  | node hooks/microbridge-event.mjs working
 ```
-
-## Supported versions
-
-TBD — document the Cursor build you tested against before merging a real
-implementation.

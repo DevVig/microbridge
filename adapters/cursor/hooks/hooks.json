@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" thinking" }
+    ],
+    "afterAgentThought": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" thinking" }
+    ],
+    "preToolUse": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" working" }
+    ],
+    "postToolUse": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" working" }
+    ],
+    "afterAgentResponse": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" done" }
+    ],
+    "stop": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" stop" }
+    ],
+    "sessionEnd": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" session_end" }
+    ]
+  }
+}

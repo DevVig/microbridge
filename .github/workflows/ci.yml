@@ -18,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install hidapi build deps (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
@@ -37,13 +39,29 @@ jobs:
         working-directory: apps/microbridge-ui
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/microbridge-ui/package-lock.json
       - run: npm ci
+      - run: npm test
       - run: npm run build
+
+  adapters:
+    name: adapters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: node --test adapters/cursor/hooks/microbridge-event.test.mjs
+      - run: node -e 'for (const file of ["adapters/cursor/.cursor-plugin/plugin.json", "adapters/cursor/hooks/hooks.json"]) JSON.parse(require("fs").readFileSync(file, "utf8"))'
 
   # Keep required-check names stable for the main branch ruleset.
   # Job names above are what GitHub shows as status contexts.

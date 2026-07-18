@@ -1,0 +1,136 @@
+name: Finalize release after Homebrew
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - Formula/microbridge.rb
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'chore/brew-v')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          TAG="${HEAD_REF#chore/brew-}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  public-install:
+    name: clean public install (${{ matrix.arch }})
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - name: Install from public tap and exercise app/service lifecycle
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          brew tap DevVig/microbridge https://github.com/DevVig/microbridge
+          brew update
+          HOMEBREW_NO_INSTALL_CLEANUP=1 brew install DevVig/microbridge/microbridge
+          test "$(brew info --json=v2 DevVig/microbridge/microbridge | jq -r '.formulae[0].installed[0].version')" = "$VERSION"
+          microbridgectl help | grep -q Usage
+          APP="$HOME/Applications/Microbridge.app"
+          test -x "$(brew --prefix DevVig/microbridge/microbridge)/bin/microbridged"
+          brew services start DevVig/microbridge/microbridge
+          for _ in {1..10}; do
+            [[ -f "$APP/.microbridge-brew" ]] && break
+            sleep 1
+          done
+          test -f "$APP/.microbridge-brew"
+          test "$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
+          brew services list | grep -E '^microbridge[[:space:]]+(started|scheduled)'
+          open "$APP"
+          APP_PID=""
+          for _ in {1..10}; do
+            APP_PID="$(pgrep -f "$APP/Contents/MacOS/" | head -1 || true)"
+            [[ -n "$APP_PID" ]] && break
+            sleep 1
+          done
+          test -n "$APP_PID"
+          kill "$APP_PID"
+          brew services stop DevVig/microbridge/microbridge
+          HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall DevVig/microbridge/microbridge
+          if brew services list | grep -q '^microbridge[[:space:]]'; then
+            echo "microbridge service is still registered after uninstall" >&2
+            exit 1
+          fi
+          test -f "$APP/.microbridge-brew"
+          rm -rf "$APP"
+          test ! -e "$APP"
+
+  promote:
+    name: promote verified release
+    needs: [resolve, public-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mark release final and record public availability
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BODY_FILE="$RUNNER_TEMP/release-body.md"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$BODY_FILE"
+          python3 - "$BODY_FILE" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          body = path.read_text()
+          body = body.replace(
+              "Signed artifacts are published as a prerelease. This version is not\n"
+              "promoted to a final release until the Homebrew formula PR merges and\n"
+              "clean public-tap installations pass on Apple Silicon and Intel.",
+              "Signed artifacts and the Homebrew formula are publicly available. "
+              "Clean installs passed on Apple Silicon and Intel.",
+          )
+          body = body.replace(
+              "Homebrew publication is pending; this release remains a prerelease.",
+              "Homebrew installation is publicly available and verified on Apple Silicon and Intel.",
+          )
+          body = body.replace(
+              "## Direct download (prerelease assets available now)",
+              "## Direct download",
+          )
+          body = body.replace(
+              "## Homebrew (available after the formula PR merges)",
+              "## Homebrew (publicly available)",
+          )
+          path.write_text(body)
+          PY
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --notes-file "$BODY_FILE"
+          {
+            echo "## Release finalized"
+            echo "GitHub assets: published"
+            echo "Homebrew formula: merged"
+            echo "Clean public installs: Apple Silicon and Intel passed"
+            echo "Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"

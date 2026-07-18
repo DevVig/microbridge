@@ -1,8 +1,10 @@
+import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS, elapsed } from "../lib/types";
 import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
 import { visibleThreads } from "../lib/threads";
 import { DeviceEcho } from "../components/DeviceEcho";
+import { fitPopover } from "../lib/bus";
 
 const MicroGlyph = ({ color }: { color: string }) => (
   <svg
@@ -101,6 +103,29 @@ export function Popover({
   );
   const liveCount = snapshot.agent_key_session_ids.filter(Boolean).length;
   const { threads, total, truncated } = visibleThreads(snapshot);
+  const adapterLayoutKey = snapshot.adapters
+    .map((adapter) => `${adapter.id}:${adapter.state}:${adapter.diagnostic}`)
+    .join("|");
+  const cardRef = useRef<HTMLDivElement>(null);
+  const threadListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+    const measure = () => {
+      const threadList = threadListRef.current;
+      const current = card.getBoundingClientRect().height;
+      const desired = threadList
+        ? current - threadList.clientHeight + threadList.scrollHeight + 8
+        : card.scrollHeight + 8;
+      void fitPopover(Math.ceil(desired));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(card);
+    if (threadListRef.current) observer.observe(threadListRef.current);
+    measure();
+    return () => observer.disconnect();
+  }, [threads.length, snapshot.device_connected, snapshot.device_name, adapterLayoutKey]);
 
   const footerButton = (
     label: string,
@@ -128,11 +153,12 @@ export function Popover({
 
   return (
     <div
-      className="flex h-screen w-full items-start justify-center bg-transparent pt-1"
+      className="flex h-screen w-full items-start justify-center overflow-hidden bg-transparent pt-1"
       style={{ fontFamily: "Inter, system-ui, sans-serif" }}
     >
       <div
-        className="mb-frost flex w-[360px] flex-col overflow-hidden rounded-2xl"
+        ref={cardRef}
+        className="mb-frost flex max-h-[calc(100vh-4px)] w-[360px] flex-col overflow-hidden rounded-2xl"
         style={{
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,
@@ -187,8 +213,8 @@ export function Popover({
             {demo
               ? "Browser demo data — start microbridged + the Tauri app for a live bus."
               : simulator
-                ? "No Micro claimed — LED frames are simulated until HID packing lands."
-                : "USB Micro seen, but HID is not claimed yet (packing pending)."}
+                ? "No Micro claimed — LED frames are simulated. Enable hardware control in Device settings to connect."
+                : "USB Micro seen, but hardware control is disabled or another process owns the HID interface."}
           </p>
         )}
 
@@ -250,7 +276,7 @@ export function Popover({
             </div>
 
             <div
-              className="px-3 pb-2"
+              className="flex min-h-0 flex-1 flex-col px-3 pb-2"
               style={{ borderTop: `1px solid ${t.hairline}` }}
             >
               <div className="flex items-center justify-between px-2 pb-1 pt-2.5">
@@ -276,11 +302,12 @@ export function Popover({
                   No live sessions
                 </p>
               ) : (
-                threads.map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-                  >
+                <div ref={threadListRef} className="mb-scrollbar min-h-0 overflow-y-auto">
+                  {threads.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                    >
                     <span
                       className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: STATE_COLORS[s.state] }}
@@ -303,8 +330,9 @@ export function Popover({
                     >
                       {elapsed(s.updated_at_ms)}
                     </span>
-                  </div>
-                ))
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </>
@@ -321,9 +349,9 @@ export function Popover({
               className="mt-1 max-w-[240px] text-[12px] leading-relaxed"
               style={{ color: t.textSecondary }}
             >
-              Plug in over USB-C. Real Agent Key LEDs/input land with HID
-              packing (device captures). Until then use Simulator mode or start
-              the daemon to watch sessions.
+              Plug in over USB-C, then enable hardware control in Device
+              settings. If another app owns the HID interface, Microbridge keeps
+              observing threads without claiming the deck.
             </p>
           </div>
         )}

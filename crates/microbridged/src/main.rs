@@ -7,11 +7,12 @@
 use std::sync::Arc;
 
 use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, AdapterEvent};
-use mb_device::open_default_device;
+use mb_device::open_default_device_with_claim;
 use microbridged::config::load_config;
 use microbridged::frontmost::spawn_frontmost_watcher;
 use microbridged::socket::serve;
 use microbridged::state::DaemonState;
+use microbridged::t3code::{self, T3_OWNER};
 use tokio::sync::{mpsc, Mutex};
 use tracing::info;
 
@@ -25,10 +26,31 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let config = load_config();
-    let device = open_default_device();
+    let env_claim = matches!(
+        std::env::var("MICROBRIDGE_HID_CLAIM").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    );
+    let device = open_default_device_with_claim(config.hardware_control_enabled || env_claim);
     info!(device = %device.descriptor().name, "device layer ready");
 
-    let shared = Arc::new(Mutex::new(DaemonState::new(device, config)));
+    let (t3_action_tx, t3_action_rx) = mpsc::unbounded_channel();
+    let mut daemon_state = DaemonState::new(device, config);
+    daemon_state.install_internal_adapter(T3_OWNER, "t3code", t3code::capabilities(), t3_action_tx);
+    let shared = Arc::new(Mutex::new(daemon_state));
+    t3code::spawn(Arc::clone(&shared), t3_action_rx);
+
+    // Hardware notifications are non-blocking. This small bounded drain also
+    // expires lease-backed IDE hook sessions without introducing network polling.
+    let input_bus = Arc::clone(&shared);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        loop {
+            interval.tick().await;
+            let mut state = input_bus.lock().await;
+            state.poll_device_inputs();
+            state.expire_leased_sessions();
+        }
+    });
 
     let (adapter_tx, mut adapter_rx) = mpsc::unbounded_channel::<AdapterEvent>();
     spawn_codex_adapter(adapter_tx.clone());
@@ -40,7 +62,12 @@ async fn main() -> std::io::Result<()> {
             let mut state = bus.lock().await;
             match event {
                 // conn_id 0 = in-process owner
-                AdapterEvent::Upsert(session) => state.upsert_session(session, 0),
+                AdapterEvent::Upsert(session) => {
+                    let adapter_id = session.id.split(':').next().unwrap_or_default();
+                    if state.adapter_enabled(adapter_id) {
+                        state.upsert_session(session, 0);
+                    }
+                }
                 AdapterEvent::Remove(id) => state.remove_session(&id),
             }
         }

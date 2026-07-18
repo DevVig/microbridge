@@ -54,7 +54,7 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 |---|---|
 | macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
 | From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
-| Hardware LEDs | Codex Micro over USB (protocol ready; set `MICROBRIDGE_HID_CLAIM=1` to write) |
+| Hardware LEDs/keys | Codex Micro over USB; enable **Settings → Device → Hardware control** (`MICROBRIDGE_HID_CLAIM=1` remains a developer override) |
 
 ## From source (developers)
 
@@ -99,12 +99,22 @@ archive.
 **In-app updates (direct installs).** A DMG/manual install updates itself:
 right-click the menu bar icon → **Check for Updates…**, or turn on *Settings →
 Updates → check automatically at launch* (off by default). The app downloads
-the signed update, verifies it, and relaunches. This is the only network call
-Microbridge makes, and only when you ask — the daemon stays zero-network.
+the signed update, verifies it, and relaunches. Update checks are the only
+app-originated network call. The daemon also contacts a T3 Code environment
+only after you explicitly enable that adapter and exchange a one-time pairing
+link; Microbridge has no telemetry or cloud relay.
 
 Homebrew installs are managed by brew instead: the app detects the brew
 marker and points you at `brew upgrade microbridge` rather than self-replacing,
 so the formula version and the on-disk app never drift apart.
+
+### Cursor integration
+
+Cursor support ships inside Microbridge. Open **Settings → Adapters** and click
+**Enable Cursor**; Microbridge installs its bundled lifecycle integration into
+Cursor's supported local-plugin directory after that explicit consent. Reload
+Cursor once if it is already open. **Remove** disables the adapter and removes
+only Microbridge's local integration. No Marketplace download is required.
 
 **Note:** Homebrew installs **prebuilt** release binaries (not a from-source
 Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
@@ -119,6 +129,7 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | `~/.microbridge/microbridged.sock` | Local NDJSON socket |
 | `~/.microbridge/config.toml` | Key source, lighting, appearance |
 | `~/.microbridge/daemon.log` | launchd / service logs |
+| `~/.cursor/plugins/local/microbridge` | Bundled Cursor lifecycle integration (only after consent) |
 
 ## Troubleshooting
 
@@ -130,9 +141,10 @@ brew services restart microbridge
 launchctl kickstart -k "gui/$(id -u)/ai.microbridge.daemon"
 ```
 
-**LEDs stay dark** — by default Microbridge only probes USB (Detected). To
-write Agent Key lighting: pause ChatGPT Desktop ownership, then
-`export MICROBRIDGE_HID_CLAIM=1` before starting the daemon. See
+**LEDs stay dark** — by default Microbridge only probes USB (Detected). Enable
+**Settings → Device → Hardware control**. If the interface is busy, pause the
+other device owner and try again. Developers can still set
+`MICROBRIDGE_HID_CLAIM=1` before starting the daemon. See
 [docs/device-hid.md](docs/device-hid.md).
 
 **Homebrew can’t fetch (private repo)** — `gh auth login`, or set

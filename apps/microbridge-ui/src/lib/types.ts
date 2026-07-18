@@ -22,6 +22,46 @@ export type KeySource =
   | "custom";
 
 export type Appearance = "system" | "light" | "dark";
+export type LightingPreset = "codex" | "phosphor" | "custom";
+
+export interface StateColors {
+  idle: string;
+  thinking: string;
+  working: string;
+  awaiting_approval: string;
+  done: string;
+  error: string;
+}
+
+export type AdapterConnectionState =
+  | "disabled"
+  | "needs_setup"
+  | "connecting"
+  | "connected"
+  | "limited"
+  | "incompatible"
+  | "error";
+
+export interface AdapterCapabilities {
+  lifecycle_observation: boolean;
+  approval_acceptance: boolean;
+  approval_rejection: boolean;
+  interrupt: boolean;
+  new_session: boolean;
+  focus_open: boolean;
+  reasoning_effort: boolean;
+}
+
+export interface AdapterStatus {
+  id: string;
+  display_name: string;
+  kind: "native" | "community";
+  state: AdapterConnectionState;
+  capabilities: AdapterCapabilities;
+  version?: string;
+  last_activity_ms?: number;
+  diagnostic: string;
+}
 
 export interface DaemonConfig {
   key_source: KeySource;
@@ -32,8 +72,10 @@ export interface DaemonConfig {
   approvals_interrupt: boolean;
   pause_leds: boolean;
   appearance: Appearance;
-  lighting_preset: string;
-  state_colors: Record<string, string>;
+  lighting_preset: LightingPreset;
+  state_colors: StateColors;
+  adapters: Record<string, { enabled: boolean }>;
+  hardware_control_enabled: boolean;
   brightness: number;
   sleep_minutes: number;
   frontmost_app: string | null;
@@ -46,6 +88,7 @@ export interface Snapshot {
   device_connected: boolean;
   device_name: string;
   config: DaemonConfig;
+  adapters: AdapterStatus[];
 }
 
 export const STATE_COLORS: Record<AgentState, string> = {
@@ -55,6 +98,16 @@ export const STATE_COLORS: Record<AgentState, string> = {
   awaiting_approval: "#FFB000",
   done: "#30C463",
   error: "#FF453A",
+};
+
+export const CODEX_PALETTE: StateColors = { ...STATE_COLORS };
+export const PHOSPHOR_PALETTE: StateColors = {
+  idle: "#4A4A52",
+  thinking: "#FFB454",
+  working: "#FF6A00",
+  awaiting_approval: "#FF3D00",
+  done: "#3DDC84",
+  error: "#FF4757",
 };
 
 export const STATE_LABELS: Record<AgentState, string> = {

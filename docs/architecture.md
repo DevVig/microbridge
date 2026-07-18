@@ -21,17 +21,17 @@ line; regressions are release blockers.
 
 | Metric | Budget | How |
 |---|---|---|
-| Idle CPU | 0.0% (no wakeups between events) | no polling loops, no timers; blocking reads on socket + HID; FSEvents/inotify for session-file watching. **Exception:** macOS frontmost watcher polls `NSWorkspace` every 400ms until a notification observer replaces it ([`frontmost.rs`](../crates/microbridged/src/frontmost.rs)). |
+| Idle CPU | near-idle with bounded wakeups | local session and frontmost-app watchers are event-driven; enabled hardware input is drained on a 16 ms tick, and an enabled paired T3 adapter refreshes at 900 ms with exponential backoff. |
 | Idle RSS (daemon) | < 15 MB, target single-digit | single static Rust binary, no runtime |
-| Network | **zero, by design** | no HTTP client linked; no telemetry, no update pings; auditable via `Cargo.lock` |
+| Network | explicit only | no telemetry; update checks are opt-in and T3 traffic requires an enabled, paired environment |
 | Device traffic | bytes per state *transition* | LED frames written only when resolved state changes; a 32–64 byte HID report each |
 | Disk | config file + log (rotated) | logs at `info` are transition-only |
 
 First-party adapters are compiled into the daemon precisely to protect this
-budget: watching `~/.codex/sessions` or Claude Code hooks is file watching,
-which Rust does natively for free. Community adapters run out-of-process, so
-their cost is theirs — the settings UI surfaces per-adapter footprint so users
-can see who is spending what.
+budget: watching `~/.codex/sessions` or Claude Code hooks is file watching.
+The paired T3 adapter uses a bounded refresh with exponential backoff because
+the supported HTTP contract is snapshot-based. Cursor uses one-shot managed
+hooks and leaves no resident helper process.
 
 ## Focus model — "one owner, no fighting"
 
@@ -46,8 +46,8 @@ The deck shows exactly one session at a time:
    not polled).
 4. **Fallback.** With no other signal, the most recently updated session wins.
 
-Because adapters only publish, a misbehaving adapter can spam the bus but can
-never seize the hardware.
+Adapters never seize the hardware. Commands route only to the focused session's
+owner and only when that owner advertised the required capability.
 
 ## Platform support
 
@@ -57,8 +57,11 @@ never seize the hardware.
 
 ## Security posture
 
-- The socket lives in the user's home directory with default `0600`-style
-  ownership; there is no privileged component.
+- The socket lives in the user's home directory with mode `0600`; there is no
+  privileged component. The logged-in macOS user is the trust boundary.
+- Management messages require a completed, protocol-compatible `ui` handshake.
+  Client roles prevent accidental adapter privilege; they do not claim to
+  isolate mutually hostile processes already running as the same user.
 - The daemon executes nothing: actions are JSON commands to adapters, which
   decide what they mean in their own app's context.
 - Hardware access is best-effort reverse engineering of the Micro's HID
