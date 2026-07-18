@@ -20,6 +20,7 @@ use crate::{AdapterEvent, AdapterTx};
 #[derive(Clone, PartialEq, Eq)]
 struct Fingerprint {
     state: AgentState,
+    app: String,
     title: String,
 }
 
@@ -52,6 +53,7 @@ pub fn spawn_codex_adapter(tx: AdapterTx) {
                 .insert(path_key, session.id.clone());
             let fp = Fingerprint {
                 state: session.state,
+                app: session.app.clone(),
                 title: session.title.clone(),
             };
             let mut map = seen_cb.lock().unwrap();
@@ -70,6 +72,7 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut id: Option<String> = None;
     let mut cwd: Option<String> = None;
+    let mut originator: Option<String> = None;
     let mut title: Option<String> = None;
     let mut state = AgentState::Idle;
 
@@ -89,6 +92,9 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
                 }
                 if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
                     cwd = Some(c.to_string());
+                }
+                if let Some(value) = payload.get("originator").and_then(|v| v.as_str()) {
+                    originator = Some(value.to_string());
                 }
             }
             Some("event_msg") => {
@@ -152,11 +158,36 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
 
     Some(SessionStatus {
         id: format!("codex:{id_raw}"),
-        app: "Codex CLI".into(),
+        app: codex_app_label(originator.as_deref(), cwd.as_deref()),
         title,
         state,
         updated_at_ms,
     })
+}
+
+/// Name the application hosting a Codex session rather than assuming every
+/// Codex rollout was launched from the standalone CLI.
+///
+/// T3 Code deliberately wraps `codex app-server`, so its journals live in the
+/// same `~/.codex/sessions` store. Current T3 releases provide the authoritative
+/// `t3code_desktop` originator. The `.t3` worktree check keeps older T3 journals
+/// correctly attributed without inspecting processes or private T3 storage.
+fn codex_app_label(originator: Option<&str>, cwd: Option<&str>) -> String {
+    if originator.is_some_and(|value| value.starts_with("t3code")) || is_t3_cwd(cwd) {
+        "T3 Code".into()
+    } else {
+        "Codex CLI".into()
+    }
+}
+
+fn is_t3_cwd(cwd: Option<&str>) -> bool {
+    let Some(cwd) = cwd else {
+        return false;
+    };
+    let Ok(home) = std::env::var("HOME") else {
+        return false;
+    };
+    cwd.starts_with(&format!("{home}/.t3/"))
 }
 
 fn file_mtime_ms(path: &std::path::Path) -> Option<u64> {
@@ -203,6 +234,35 @@ mod tests {
         assert_eq!(session.id, "codex:abc-123");
         assert_eq!(session.title, "Build the AIhero menu bar pet");
         assert_eq!(session.state, AgentState::Working);
+        assert_eq!(session.app, "Codex CLI");
+    }
+
+    #[test]
+    fn labels_t3_hosted_codex_session_from_originator() {
+        let dir = tempfile_dir();
+        let path = dir.join("t3-originator.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"t3-1","cwd":"/Users/me/dev/repo","originator":"t3code_desktop"}}}}"#
+        )
+        .unwrap();
+        let session = parse_codex_session(&path).unwrap();
+        assert_eq!(session.id, "codex:t3-1");
+        assert_eq!(session.app, "T3 Code");
+    }
+
+    #[test]
+    fn labels_older_t3_hosted_session_from_worktree() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            codex_app_label(None, Some(&format!("{home}/.t3/worktrees/project/branch"))),
+            "T3 Code"
+        );
+        assert_eq!(
+            codex_app_label(Some("codex_cli_rs"), Some("/Users/me/dev/project")),
+            "Codex CLI"
+        );
     }
 
     fn tempfile_dir() -> PathBuf {

@@ -520,6 +520,10 @@ export function Settings({
               click. Community describes ownership, not readiness. State and
               capabilities below are live.
             </p>
+            <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
+              T3-hosted Codex threads are identified automatically. Enable and pair
+              the T3 Code card only when you also want T3&apos;s supported thread controls.
+            </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
                 {adapterMessage}
