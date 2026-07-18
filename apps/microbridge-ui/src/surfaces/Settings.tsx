@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DaemonConfig, Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS } from "../lib/types";
 import { DARK, LIGHT } from "../lib/theme";
+import {
+  appVersion,
+  autoCheckEnabled,
+  runUpdateCheck,
+  setAutoCheckEnabled,
+  updateChannel,
+  type UpdateChannel,
+} from "../lib/updater";
 import {
   controlInspector,
   DeviceTwin,
@@ -40,7 +48,7 @@ const KEY_SOURCES: {
   },
 ];
 
-type Tab = "keys" | "agent" | "adapters" | "device";
+type Tab = "keys" | "agent" | "adapters" | "device" | "updates";
 
 export function Settings({
   snapshot,
@@ -64,11 +72,21 @@ export function Settings({
     ? controlInspector(selected, snapshot)
     : null;
 
+  const [version, setVersion] = useState<string | null>(null);
+  const [channel, setChannel] = useState<UpdateChannel | null>(null);
+  const [autoCheck, setAutoCheck] = useState<boolean>(() => autoCheckEnabled());
+
+  useEffect(() => {
+    void appVersion().then(setVersion);
+    void updateChannel().then(setChannel);
+  }, []);
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "keys", label: "Keys" },
     { id: "agent", label: "Agent Keys" },
     { id: "adapters", label: "Adapters" },
     { id: "device", label: "Device" },
+    { id: "updates", label: "Updates" },
   ];
 
   return (
@@ -443,6 +461,74 @@ export function Settings({
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {tab === "updates" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">Updates</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              The daemon stays zero-network. This is the only place Microbridge
+              reaches out — and only when you ask it to.
+            </p>
+
+            <div
+              className="mt-5 rounded-2xl p-4"
+              style={{
+                backgroundColor: t.panel,
+                border: `1px solid ${t.hairline}`,
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[12.5px] font-medium">
+                    Microbridge {version ? `v${version}` : ""}
+                  </div>
+                  <div
+                    className="mt-0.5 text-[11px]"
+                    style={{ color: t.textSecondary }}
+                  >
+                    {channel === "brew"
+                      ? "Managed by Homebrew — brew upgrade microbridge"
+                      : channel === "direct"
+                        ? "Direct install — updates in place"
+                        : "Checking install type…"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runUpdateCheck({ silent: false })}
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-medium"
+                  style={{
+                    backgroundColor: t.hoverBg,
+                    color: t.text,
+                    border: `1px solid ${t.hairline}`,
+                  }}
+                >
+                  Check for Updates
+                </button>
+              </div>
+            </div>
+
+            <label className="mt-4 flex items-center gap-2 text-[12.5px]">
+              <input
+                type="checkbox"
+                checked={autoCheck}
+                onChange={(e) => {
+                  setAutoCheck(e.target.checked);
+                  setAutoCheckEnabled(e.target.checked);
+                }}
+              />
+              Check for updates automatically when Microbridge starts
+            </label>
+            <p
+              className="mt-2 max-w-md text-[11px]"
+              style={{ color: t.textMuted }}
+            >
+              Off by default. When on, Microbridge quietly checks once at launch
+              and only speaks up if an update is ready. No background polling,
+              ever.
+            </p>
           </section>
         )}
       </main>

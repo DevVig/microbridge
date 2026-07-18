@@ -8,12 +8,13 @@ import {
 } from "./lib/bus";
 import { resolveAppearance } from "./lib/theme";
 import type { DaemonConfig, Snapshot } from "./lib/types";
+import { autoCheckEnabled, runUpdateCheck } from "./lib/updater";
 import { Hud } from "./surfaces/Hud";
 import { Popover } from "./surfaces/Popover";
 import { Settings } from "./surfaces/Settings";
 
 type View = "popover" | "settings" | "hud";
-type SettingsTab = "keys" | "agent" | "adapters" | "device";
+type SettingsTab = "keys" | "agent" | "adapters" | "device" | "updates";
 
 function initialView(): View {
   const q = new URLSearchParams(window.location.search).get("view");
@@ -39,6 +40,37 @@ export default function App() {
       unsub?.();
     };
   }, []);
+
+  // Updates run only from the popover (always loaded) so they fire once, not
+  // once per window. The tray "Check for Updates…" item emits the event; the
+  // opt-in launch check is silent so a current install shows nothing.
+  useEffect(() => {
+    if (view !== "popover") return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    if (autoCheckEnabled()) {
+      void runUpdateCheck({ silent: true });
+    }
+
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const un = await listen("menu://check-updates", () => {
+          void runUpdateCheck({ silent: false });
+        });
+        if (disposed) un();
+        else unlisten = un;
+      } catch {
+        /* not running under Tauri */
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [view]);
 
   if (!snapshot) {
     return (

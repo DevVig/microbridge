@@ -155,10 +155,54 @@ fn quit_ui(app: AppHandle) {
     app.exit(0);
 }
 
+/// Install channel of the running app. Homebrew drops a `.microbridge-brew`
+/// marker at the bundle root (see the formula's `post_install`); its absence
+/// means a DMG/manual install. The in-app self-updater only replaces `direct`
+/// installs — brew copies are routed to `brew upgrade` so the formula version
+/// and the on-disk bundle never drift apart.
+#[tauri::command]
+fn update_channel() -> String {
+    if brew_marker_present() {
+        "brew".into()
+    } else {
+        "direct".into()
+    }
+}
+
+/// True when the running bundle carries Homebrew's ownership marker.
+/// `…/Microbridge.app/Contents/MacOS/microbridge-ui` → the bundle root is the
+/// third ancestor of the executable.
+fn brew_marker_present() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    match exe.ancestors().nth(3) {
+        Some(bundle) => bundle.join(".microbridge-brew").exists(),
+        None => false,
+    }
+}
+
+/// App version, read from the bundle metadata (single source of truth in
+/// `tauri.conf.json`). Shown on the Updates settings tab.
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Ask the frontend to run a user-initiated update check. The check / prompt /
+/// download / relaunch flow lives in the always-loaded popover webview and
+/// shows native dialogs via the dialog plugin.
+fn trigger_update_check(app: &AppHandle) {
+    let _ = app.emit("menu://check-updates", ());
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -233,6 +277,13 @@ pub fn run() {
 
             // Right-click context menu. Left-click still toggles the popover
             // (`show_menu_on_left_click(false)` keeps the menu on right-click only).
+            let check_updates_item = MenuItem::with_id(
+                app,
+                "check-updates",
+                "Check for Updates…",
+                true,
+                None::<&str>,
+            )?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_item =
@@ -240,6 +291,7 @@ pub fn run() {
             let tray_menu = Menu::with_items(
                 app,
                 &[
+                    &check_updates_item,
                     &settings_item,
                     &PredefinedMenuItem::separator(app)?,
                     &quit_item,
@@ -253,6 +305,7 @@ pub fn run() {
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
+                    "check-updates" => trigger_update_check(app),
                     "settings" => show_settings_window(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -303,7 +356,9 @@ pub fn run() {
             open_settings,
             close_settings,
             hide_popover,
-            quit_ui
+            quit_ui,
+            update_channel,
+            app_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running microbridge-ui");
