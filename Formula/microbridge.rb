@@ -17,7 +17,7 @@ class Microbridge < Formula
   desc "Open-source control plane for the Codex Micro (menu bar + daemon)"
   homepage "https://github.com/DevVig/microbridge"
   version "0.1.0"
-  license any_of: ["MIT", "Apache-2.0"]
+  license "MIT"
   head "https://github.com/DevVig/microbridge.git", branch: "main"
 
   depends_on :macos
