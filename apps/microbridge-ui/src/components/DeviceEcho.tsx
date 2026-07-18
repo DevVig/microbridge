@@ -1,5 +1,5 @@
 import type { Snapshot } from "../lib/types";
-import { STATE_COLORS } from "../lib/types";
+import { agentKeyLedFrame } from "../lib/types";
 import type { ThemeTokens } from "../lib/theme";
 
 /**
@@ -14,15 +14,19 @@ function MiniAgentKey({
   index,
   snapshot,
   connected,
+  onActivate,
 }: {
   index: number;
   snapshot: Snapshot;
   connected: boolean;
+  onActivate?: (index: number, open: boolean) => void;
 }) {
-  const id = connected ? snapshot.agent_key_session_ids[index] : null;
+  const frame = agentKeyLedFrame(snapshot);
+  const led = frame.keys[index];
+  const id = connected ? led?.session_id : null;
   const session = id ? snapshot.sessions.find((s) => s.id === id) : null;
-  const color = session ? STATE_COLORS[session.state] : null;
-  const focused = id != null && id === snapshot.focused_session_id;
+  const color = frame.paused ? null : (led?.color ?? null);
+  const focused = Boolean(led?.focused);
   const pulse =
     session?.state === "awaiting_approval"
       ? "mb-led-pulse"
@@ -31,7 +35,13 @@ function MiniAgentKey({
         : "";
 
   return (
-    <span
+    <button
+      type="button"
+      disabled={!id || !onActivate}
+      onClick={() => onActivate?.(index, false)}
+      onDoubleClick={() => onActivate?.(index, true)}
+      aria-label={session ? `Agent Key ${index + 1}: ${session.title || session.id}` : `Agent Key ${index + 1}: unassigned`}
+      title={session ? `${session.app} · ${session.title || session.id}` : "Unassigned"}
       className="relative rounded-[6px]"
       style={{
         width: U,
@@ -40,6 +50,7 @@ function MiniAgentKey({
           "linear-gradient(180deg, rgba(255,255,255,0.62), rgba(238,238,235,0.55))",
         border: focused ? "1.5px solid #3D7EFF" : "1px solid rgba(0,0,0,0.11)",
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.9)${color ? `, 0 0 8px ${color}77` : ""}`,
+        opacity: color ? Math.max(0.2, frame.brightness / 100) : 1,
       }}
     >
       {color && (
@@ -58,7 +69,7 @@ function MiniAgentKey({
         className="absolute left-1/2 top-1/2 h-[2px] w-[6px] -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
         style={{ backgroundColor: "rgba(70,70,82,0.3)" }}
       />
-    </span>
+    </button>
   );
 }
 
@@ -82,9 +93,11 @@ function MiniWhiteKey({ wide = false }: { wide?: boolean }) {
 export function DeviceEcho({
   t,
   snapshot,
+  onAgentKey,
 }: {
   t: ThemeTokens;
   snapshot: Snapshot;
+  onAgentKey?: (index: number, open: boolean) => void;
 }) {
   const connected =
     snapshot.device_connected ||
@@ -92,8 +105,7 @@ export function DeviceEcho({
     snapshot.device_name.includes("usb");
   return (
     <div
-      className="pointer-events-none flex flex-col items-center gap-2"
-      aria-hidden="true"
+      className="flex flex-col items-center gap-2"
     >
       <div
         className="rounded-[14px] p-[7px]"
@@ -125,8 +137,8 @@ export function DeviceEcho({
                   boxShadow: "0 1.5px 3px rgba(0,0,0,0.16)",
                 }}
               />
-              <MiniAgentKey index={0} snapshot={snapshot} connected={connected} />
-              <MiniAgentKey index={1} snapshot={snapshot} connected={connected} />
+              <MiniAgentKey index={0} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
+              <MiniAgentKey index={1} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
               <span
                 className="flex items-center justify-center rounded-[7px]"
                 style={{
@@ -147,10 +159,10 @@ export function DeviceEcho({
               </span>
             </div>
             <div className="flex" style={{ gap: GAP }}>
-              <MiniAgentKey index={2} snapshot={snapshot} connected={connected} />
-              <MiniAgentKey index={3} snapshot={snapshot} connected={connected} />
-              <MiniAgentKey index={4} snapshot={snapshot} connected={connected} />
-              <MiniAgentKey index={5} snapshot={snapshot} connected={connected} />
+              <MiniAgentKey index={2} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
+              <MiniAgentKey index={3} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
+              <MiniAgentKey index={4} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
+              <MiniAgentKey index={5} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
             </div>
             <div className="flex" style={{ gap: GAP }}>
               <MiniWhiteKey />

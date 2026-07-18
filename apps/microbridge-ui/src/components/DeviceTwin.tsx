@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import type { AgentState, Snapshot } from "../lib/types";
-import { STATE_COLORS, STATE_LABELS } from "../lib/types";
+import { agentKeyLedFrame, type Snapshot } from "../lib/types";
+import { STATE_LABELS } from "../lib/types";
 
 /** Control ids on the kbd-1.0 twin (MagicPath DeviceKeys layout). */
 export type ControlId =
@@ -118,18 +118,22 @@ function AgentKeycap({
   selected,
   onSelect,
   snapshot,
+  onActivate,
 }: {
   id: ControlId;
   selected: boolean;
   onSelect: () => void;
   snapshot: Snapshot;
+  onActivate?: (index: number, open: boolean) => void;
 }) {
   const index = AG_INDEX[id] ?? 0;
-  const sid = snapshot.agent_key_session_ids[index];
+  const frame = agentKeyLedFrame(snapshot);
+  const led = frame.keys[index];
+  const sid = led?.session_id;
   const session = sid ? snapshot.sessions.find((s) => s.id === sid) : null;
   const lit = session != null;
-  const color = session ? STATE_COLORS[session.state as AgentState] : "transparent";
-  const focused = sid != null && sid === snapshot.focused_session_id;
+  const color = frame.paused ? "transparent" : (led?.color ?? "transparent");
+  const focused = Boolean(led?.focused);
   const pulse =
     session?.state === "awaiting_approval"
       ? "mb-led-pulse"
@@ -140,7 +144,11 @@ function AgentKeycap({
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => {
+        onSelect();
+        onActivate?.(index, false);
+      }}
+      onDoubleClick={() => onActivate?.(index, true)}
       aria-pressed={selected}
       title={LABELS[id]}
       className="relative rounded-[13px] transition-transform duration-150 hover:scale-[1.04]"
@@ -392,10 +400,12 @@ export function DeviceTwin({
   snapshot,
   selected,
   onSelect,
+  onAgentKey,
 }: {
   snapshot: Snapshot;
   selected: ControlId | null;
   onSelect: (id: ControlId) => void;
+  onAgentKey?: (index: number, open: boolean) => void;
 }) {
   const common = (id: ControlId) => ({
     selected: selected === id,
@@ -438,15 +448,15 @@ export function DeviceTwin({
         <div className="flex flex-col" style={{ gap: GAP }}>
           <div className="flex" style={{ gap: GAP }}>
             <Dial {...common("knob")} />
-            <AgentKeycap id="ag1" snapshot={snapshot} {...common("ag1")} />
-            <AgentKeycap id="ag2" snapshot={snapshot} {...common("ag2")} />
+            <AgentKeycap id="ag1" snapshot={snapshot} onActivate={onAgentKey} {...common("ag1")} />
+            <AgentKeycap id="ag2" snapshot={snapshot} onActivate={onAgentKey} {...common("ag2")} />
             <Joystick {...common("joystick")} />
           </div>
           <div className="flex" style={{ gap: GAP }}>
-            <AgentKeycap id="ag3" snapshot={snapshot} {...common("ag3")} />
-            <AgentKeycap id="ag4" snapshot={snapshot} {...common("ag4")} />
-            <AgentKeycap id="ag5" snapshot={snapshot} {...common("ag5")} />
-            <AgentKeycap id="ag6" snapshot={snapshot} {...common("ag6")} />
+            <AgentKeycap id="ag3" snapshot={snapshot} onActivate={onAgentKey} {...common("ag3")} />
+            <AgentKeycap id="ag4" snapshot={snapshot} onActivate={onAgentKey} {...common("ag4")} />
+            <AgentKeycap id="ag5" snapshot={snapshot} onActivate={onAgentKey} {...common("ag5")} />
+            <AgentKeycap id="ag6" snapshot={snapshot} onActivate={onAgentKey} {...common("ag6")} />
           </div>
           <div className="flex" style={{ gap: GAP }}>
             <CommandKeycap icon="bolt" {...common("fast")} />

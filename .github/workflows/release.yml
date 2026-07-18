@@ -135,6 +135,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           npm ci
+          # Bundle the daemon inside direct-download apps so the device twin
+          # always has a real local source of truth without a separate install.
+          cargo build --manifest-path ../../Cargo.toml --release -p microbridged --target ${{ matrix.target }}
+          mkdir -p src-tauri/binaries
+          cp "../../target/${{ matrix.target }}/release/microbridged" \
+            "src-tauri/binaries/microbridged-${{ matrix.target }}"
           # createUpdaterArtifacts (tauri.conf.json) requires the updater signing
           # key. Forks without the secret still build — just without in-app
           # updater artifacts (they can use the DMG / Homebrew).
@@ -346,7 +352,8 @@ jobs:
 
             Grab `microbridge-ui-${{ github.ref_name }}-aarch64-apple-darwin.dmg` (Apple Silicon)
             or `…-x86_64-apple-darwin.dmg` (Intel) from the assets below, open it, and drag
-            Microbridge into Applications. Pair with the daemon archive or Homebrew formula.
+            Microbridge into Applications. The app includes and starts its own local daemon;
+            no separate daemon or Marketplace plugin download is required.
 
             Binary + app archive: `./scripts/install-from-release.sh ${{ github.ref_name }}`
 

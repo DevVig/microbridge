@@ -20,7 +20,15 @@ pub async fn serve(shared: SharedState) -> std::io::Result<()> {
         // Keep the config dir private; the socket itself is locked to 0600 below.
         let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
-    let _ = std::fs::remove_file(&path);
+    if path.exists() {
+        if UnixStream::connect(&path).await.is_ok() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                format!("microbridged is already listening at {}", path.display()),
+            ));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     info!(
@@ -326,6 +334,23 @@ async fn apply(
                 message: result
                     .err()
                     .unwrap_or_else(|| "Lifecycle event accepted.".into()),
+            });
+        }
+        ClientMessage::ActivateAgentKey { index, open } => {
+            if !*named || *role != ClientRole::Ui {
+                let _ = tx.send(ServerMessage::AdapterOperation {
+                    adapter_id: "device".into(),
+                    ok: false,
+                    message: "Agent Key activation requires a completed UI handshake.".into(),
+                });
+                return;
+            }
+            let mut state = shared.lock().await;
+            let result = state.activate_agent_key(index, open);
+            let _ = tx.send(ServerMessage::AdapterOperation {
+                adapter_id: "device".into(),
+                ok: result.is_ok(),
+                message: result.unwrap_or_else(|message| message),
             });
         }
     }

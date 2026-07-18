@@ -5,6 +5,7 @@ node_modules/
 apps/microbridge-ui/dist/
 apps/microbridge-ui/src-tauri/target/
 apps/microbridge-ui/src-tauri/gen/
+apps/microbridge-ui/src-tauri/binaries/
 
 # local working notes (not part of the public project)
 /documentation/

@@ -42,6 +42,45 @@ pub struct SessionStatus {
     pub updated_at_ms: u64,
 }
 
+/// The exact LED state the daemon resolved for one physical Agent Key.
+/// This is included in snapshots so the software twin mirrors the hardware
+/// frame instead of independently guessing colors or assignments.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AgentKeyLed {
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<AgentState>,
+    /// Effective palette color as `#RRGGBB`; `None` means the LED is off.
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub focused: bool,
+}
+
+/// The full frame sent to the device layer after palette normalization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentKeyLedFrame {
+    #[serde(default)]
+    pub keys: Vec<AgentKeyLed>,
+    #[serde(default = "default_brightness")]
+    pub brightness: u8,
+    #[serde(default)]
+    pub paused: bool,
+}
+
+impl Default for AgentKeyLedFrame {
+    fn default() -> Self {
+        Self {
+            // Empty distinguishes an omitted legacy field from a real six-key
+            // frame, allowing newer UIs to derive a compatibility fallback.
+            keys: Vec::new(),
+            brightness: default_brightness(),
+            paused: false,
+        }
+    }
+}
+
 /// Who is speaking on the socket. Additive in v0; omitted ⇒ adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -349,6 +388,10 @@ pub struct Snapshot {
     pub focused_session_id: Option<String>,
     /// Six Agent Key slots — session ids or null.
     pub agent_key_session_ids: Vec<Option<String>>,
+    /// Exact frame passed to the device implementation. Older daemons omit it;
+    /// clients must fall back to `agent_key_session_ids` in that case.
+    #[serde(default)]
+    pub agent_key_led_frame: AgentKeyLedFrame,
     pub device_connected: bool,
     pub device_name: String,
     pub config: DaemonConfig,
@@ -360,13 +403,30 @@ pub struct Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BusEvent {
-    SessionUpserted { session: SessionStatus },
-    SessionRemoved { session_id: String },
-    FocusChanged { session_id: Option<String> },
-    AgentKeysChanged { session_ids: Vec<Option<String>> },
-    DeviceChanged { connected: bool, name: String },
-    ConfigChanged { config: Box<DaemonConfig> },
-    AdaptersChanged { adapters: Vec<AdapterStatus> },
+    SessionUpserted {
+        session: SessionStatus,
+    },
+    SessionRemoved {
+        session_id: String,
+    },
+    FocusChanged {
+        session_id: Option<String>,
+    },
+    AgentKeysChanged {
+        session_ids: Vec<Option<String>>,
+        #[serde(default)]
+        led_frame: AgentKeyLedFrame,
+    },
+    DeviceChanged {
+        connected: bool,
+        name: String,
+    },
+    ConfigChanged {
+        config: Box<DaemonConfig>,
+    },
+    AdaptersChanged {
+        adapters: Vec<AdapterStatus>,
+    },
 }
 
 /// Client → daemon messages (adapters and UI share the socket).
@@ -410,6 +470,12 @@ pub enum ClientMessage {
         session: SessionStatus,
         #[serde(default = "default_lifecycle_ttl_ms")]
         ttl_ms: u64,
+    },
+    /// UI/software-twin equivalent of pressing one physical Agent Key.
+    ActivateAgentKey {
+        index: usize,
+        #[serde(default)]
+        open: bool,
     },
 }
 
@@ -516,6 +582,7 @@ mod tests {
                 sessions: vec![],
                 focused_session_id: None,
                 agent_key_session_ids: vec![None; AGENT_KEY_COUNT],
+                agent_key_led_frame: AgentKeyLedFrame::default(),
                 device_connected: false,
                 device_name: "mock".into(),
                 config: DaemonConfig::default(),
@@ -525,6 +592,15 @@ mod tests {
         let round =
             serde_json::from_str::<ServerMessage>(&serde_json::to_string(&snap).unwrap()).unwrap();
         assert_eq!(round, snap);
+    }
+
+    #[test]
+    fn legacy_snapshot_defaults_the_led_frame() {
+        let json = r#"{"type":"snapshot","snapshot":{"sessions":[],"focused_session_id":null,"agent_key_session_ids":[null,null,null,null,null,null],"device_connected":false,"device_name":"mock","config":{},"adapters":[]}}"#;
+        let ServerMessage::Snapshot { snapshot } = serde_json::from_str(json).unwrap() else {
+            panic!("expected snapshot");
+        };
+        assert_eq!(snapshot.agent_key_led_frame, AgentKeyLedFrame::default());
     }
 
     #[test]
