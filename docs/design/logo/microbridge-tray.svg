@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="Microbridge">
+  <title>Microbridge</title>
+  <!-- monochrome template glyph: bridge only (deck + two arches), transparent bg -->
+  <path fill="none" stroke="#000000" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"
+        d="M 8 34 V 24 A 7 7 0 0 1 22 24 V 34 M 22 24 A 7 7 0 0 1 36 24 V 34"/>
+  <rect x="4" y="12" width="36" height="5" rx="2.5" fill="#000000"/>
+</svg>
