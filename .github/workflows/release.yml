@@ -40,7 +40,7 @@ jobs:
           mkdir -p "staging/${STAGE}"
           cp "target/${{ matrix.target }}/release/microbridged" "staging/${STAGE}/"
           cp "target/${{ matrix.target }}/release/microbridgectl" "staging/${STAGE}/"
-          cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
+          cp README.md LICENSE INSTALL.md "staging/${STAGE}/"
           tar -C staging -czf "${STAGE}.tar.gz" "${STAGE}"
           echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
@@ -160,7 +160,7 @@ jobs:
           STAGE="microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "staging/${STAGE}" "ui-out"
           cp -R "$APP" "staging/${STAGE}/"
-          cp README.md LICENSE-MIT LICENSE-APACHE INSTALL.md "staging/${STAGE}/"
+          cp README.md LICENSE INSTALL.md "staging/${STAGE}/"
           tar -C staging -czf "ui-out/${STAGE}.tar.gz" "${STAGE}"
 
           DMG=""

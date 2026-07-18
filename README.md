@@ -133,4 +133,4 @@ This project is only possible because OpenAI chose to keep the Micro open — an
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Contributions are accepted under the same terms.
+[MIT](LICENSE) licensed — a permissive, OSI-approved open source license. Contributions are accepted under the same terms (inbound = outbound).

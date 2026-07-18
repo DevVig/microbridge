@@ -12,8 +12,8 @@ shape before you spend time.
   feature. See [docs/architecture.md](docs/architecture.md#footprint-budget).
 - **Protocol changes** must update `crates/mb-protocol` and
   `docs/protocol.md` in the same PR, with a version bump if breaking.
-- **No CLA.** Contributions are accepted under the project's dual
-  MIT/Apache-2.0 license (inbound = outbound).
+- **No CLA.** Contributions are accepted under the project's
+  [MIT](LICENSE) license (inbound = outbound).
 
 ## Dev setup
 
