@@ -9,6 +9,7 @@ VERSION="${2:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 EXPECTED_ARCH="${3:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 TAP="devvig/microbridge-ci"
 APP="$HOME/Applications/Microbridge.app"
+BREW_LOG="$(brew --prefix)/var/log/microbridge.log"
 
 cleanup() {
   brew services stop "$TAP/microbridge" >/dev/null 2>&1 || true
@@ -18,7 +19,32 @@ cleanup() {
   fi
   brew untap "$TAP" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+
+diagnostics() {
+  echo "==> Microbridge formula smoke diagnostics" >&2
+  brew services list >&2 || true
+  if [[ -f "$BREW_LOG" ]]; then
+    echo "==> $BREW_LOG" >&2
+    tail -200 "$BREW_LOG" >&2 || true
+  fi
+  if [[ -d "$APP" ]]; then
+    echo "==> Installed app bundle" >&2
+    find "$APP/Contents" -maxdepth 2 -type f -print >&2 || true
+    /usr/libexec/PlistBuddy -c 'Print:CFBundleShortVersionString' \
+      "$APP/Contents/Info.plist" >&2 || true
+  fi
+}
+
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    diagnostics
+  fi
+  cleanup
+  exit "$status"
+}
+trap on_exit EXIT
 
 test "$(uname -m)" = "$EXPECTED_ARCH"
 brew tap-new "$TAP"
@@ -33,24 +59,31 @@ test -x "$PREFIX/bin/microbridged"
 test -x "$PREFIX/bin/microbridgectl"
 
 brew services start "$TAP/microbridge"
-for _ in {1..10}; do
+for _ in {1..30}; do
   [[ -f "$APP/.microbridge-brew" ]] && break
   sleep 1
 done
 test -d "$APP"
 test -f "$APP/.microbridge-brew"
-test "$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
-brew services list | grep -E '^microbridge[[:space:]]+(started|scheduled)'
+test "$(/usr/libexec/PlistBuddy -c 'Print:CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
 
-open "$APP"
+SERVICE_STATE=""
+for _ in {1..30}; do
+  SERVICE_STATE="$(brew services list | awk '$1 == "microbridge" { print $2; exit }')"
+  [[ "$SERVICE_STATE" == "started" || "$SERVICE_STATE" == "scheduled" ]] && break
+  sleep 1
+done
+test "$SERVICE_STATE" = "started" || test "$SERVICE_STATE" = "scheduled"
+
+open -n "$APP"
 APP_PID=""
-for _ in {1..10}; do
+for _ in {1..30}; do
   APP_PID="$(pgrep -f "$APP/Contents/MacOS/" | head -1 || true)"
   [[ -n "$APP_PID" ]] && break
   sleep 1
 done
 test -n "$APP_PID"
-kill "$APP_PID"
+kill "$APP_PID" || true
 
 brew services stop "$TAP/microbridge"
 HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge"

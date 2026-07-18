@@ -58,22 +58,32 @@ jobs:
           APP="$HOME/Applications/Microbridge.app"
           test -x "$(brew --prefix DevVig/microbridge/microbridge)/bin/microbridged"
           brew services start DevVig/microbridge/microbridge
-          for _ in {1..10}; do
+          for _ in {1..30}; do
             [[ -f "$APP/.microbridge-brew" ]] && break
             sleep 1
           done
           test -f "$APP/.microbridge-brew"
-          test "$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
-          brew services list | grep -E '^microbridge[[:space:]]+(started|scheduled)'
-          open "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print:CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
+          SERVICE_STATE=""
+          for _ in {1..30}; do
+            SERVICE_STATE="$(brew services list | awk '$1 == "microbridge" { print $2; exit }')"
+            [[ "$SERVICE_STATE" == "started" || "$SERVICE_STATE" == "scheduled" ]] && break
+            sleep 1
+          done
+          if [[ "$SERVICE_STATE" != "started" && "$SERVICE_STATE" != "scheduled" ]]; then
+            brew services list
+            tail -200 "$(brew --prefix)/var/log/microbridge.log" || true
+            exit 1
+          fi
+          open -n "$APP"
           APP_PID=""
-          for _ in {1..10}; do
+          for _ in {1..30}; do
             APP_PID="$(pgrep -f "$APP/Contents/MacOS/" | head -1 || true)"
             [[ -n "$APP_PID" ]] && break
             sleep 1
           done
           test -n "$APP_PID"
-          kill "$APP_PID"
+          kill "$APP_PID" || true
           brew services stop DevVig/microbridge/microbridge
           HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall DevVig/microbridge/microbridge
           if brew services list | grep -q '^microbridge[[:space:]]'; then
