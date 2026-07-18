@@ -44,12 +44,12 @@ Or `make ci`. CI enforces Rust checks on macOS/Linux and the UI build on Ubuntu.
 Push a version tag to publish binaries via GitHub Actions:
 
 ```sh
-git tag v0.0.1
-git push origin v0.0.1
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 Assets are attached to the GitHub Release; users can run
-`./scripts/install-from-release.sh v0.0.1`.
+`./scripts/install-from-release.sh v0.1.0`.
 
 ## Commits and PRs
 

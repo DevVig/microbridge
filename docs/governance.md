@@ -39,8 +39,8 @@ on merge, auto-merge enabled.
 ## macOS install + auto-update (Homebrew)
 
 **This is the supported consumer path** — not cloning the git repo.
-`brew install microbridge` builds/installs the **menu bar app** and the
-daemon (not CLI-only).
+`brew install microbridge` installs **prebuilt** release binaries for the
+**menu bar app** and the daemon (not CLI-only; not a from-source Tauri build).
 
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge

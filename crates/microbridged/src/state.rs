@@ -156,8 +156,14 @@ impl DaemonState {
         };
         let Some(tx) = self.adapter_txs.get(&owner) else {
             // In-process adapters: owner id 0 is reserved for local handlers.
+            // Codex/Claude control-plane mapping lands in a follow-up (#24);
+            // until then actions are acknowledged but not forwarded to a CLI.
             if owner == 0 {
-                info!(session_id, ?action, "in-process action");
+                info!(
+                    session_id,
+                    ?action,
+                    "in-process action (no runtime bridge yet — use microbridgectl / await #24)"
+                );
                 return;
             }
             warn!(session_id, ?action, owner, "adapter connection gone");

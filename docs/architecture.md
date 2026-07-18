@@ -21,7 +21,7 @@ line; regressions are release blockers.
 
 | Metric | Budget | How |
 |---|---|---|
-| Idle CPU | 0.0% (no wakeups between events) | no polling loops, no timers; blocking reads on socket + HID; FSEvents/inotify for session-file watching |
+| Idle CPU | 0.0% (no wakeups between events) | no polling loops, no timers; blocking reads on socket + HID; FSEvents/inotify for session-file watching. **Exception:** macOS frontmost watcher polls `NSWorkspace` every 400ms until a notification observer replaces it ([`frontmost.rs`](../crates/microbridged/src/frontmost.rs)). |
 | Idle RSS (daemon) | < 15 MB, target single-digit | single static Rust binary, no runtime |
 | Network | **zero, by design** | no HTTP client linked; no telemetry, no update pings; auditable via `Cargo.lock` |
 | Device traffic | bytes per state *transition* | LED frames written only when resolved state changes; a 32–64 byte HID report each |
@@ -41,7 +41,7 @@ The deck shows exactly one session at a time:
    deck (and the approve/reject keys) until resolved.
 2. **Pinned beats auto.** The user can pin a session from Settings or a
    device key; pinning disables auto-follow until unpinned.
-3. **Auto-follow (M3).** Otherwise the frontmost app's active session owns the
+3. **Auto-follow.** Otherwise the frontmost app's active session owns the
    deck — driven by `NSWorkspace` frontmost-app notifications (event-driven,
    not polled).
 4. **Fallback.** With no other signal, the most recently updated session wins.

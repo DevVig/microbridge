@@ -1,6 +1,6 @@
 import type { DaemonConfig, Snapshot } from "./types";
 
-/** Talks to microbridged via Tauri when available; demo snapshot in browser. */
+/** Talks to microbridged via Tauri when available; demo snapshot in browser only. */
 
 const DEMO: Snapshot = {
   sessions: [
@@ -28,8 +28,8 @@ const DEMO: Snapshot = {
   ],
   focused_session_id: "s1",
   agent_key_session_ids: ["s1", "s2", "s3", null, null, null],
-  device_connected: true,
-  device_name: "mock",
+  device_connected: false,
+  device_name: "demo-browser",
   config: {
     key_source: "most_recent",
     pinned_session_ids: [],
@@ -59,6 +59,10 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 export async function fetchSnapshot(): Promise<Snapshot> {
   const snap = await invoke<Snapshot>("get_snapshot");
   return snap ?? DEMO;
+}
+
+export function isDemoSnapshot(snapshot: Snapshot): boolean {
+  return snapshot.device_name === "demo-browser";
 }
 
 export async function setConfig(config: DaemonConfig): Promise<DaemonConfig> {
@@ -95,8 +99,4 @@ export async function subscribeSnapshot(
     const id = window.setInterval(() => onSnapshot(DEMO), 2000);
     return () => window.clearInterval(id);
   }
-}
-
-export function isDemoSnapshot(snapshot: Snapshot): boolean {
-  return snapshot.device_name === "mock" && snapshot.sessions.some((s) => s.id === "s1");
 }
