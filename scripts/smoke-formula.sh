@@ -3,6 +3,7 @@
 # package lifecycle. The caller supplies a local formula, expected version, and
 # expected machine architecture.
 set -euo pipefail
+export HOMEBREW_NO_COLOR=1
 
 FORMULA="${1:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 VERSION="${2:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
