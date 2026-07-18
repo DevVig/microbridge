@@ -10,6 +10,7 @@ EXPECTED_ARCH="${3:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 TAP="devvig/microbridge-ci"
 APP="$HOME/Applications/Microbridge.app"
 BREW_LOG="$(brew --prefix)/var/log/microbridge.log"
+APP_LOG="${RUNNER_TEMP:-/tmp}/microbridge-app.log"
 
 cleanup() {
   brew services stop "$TAP/microbridge" >/dev/null 2>&1 || true
@@ -26,6 +27,10 @@ diagnostics() {
   if [[ -f "$BREW_LOG" ]]; then
     echo "==> $BREW_LOG" >&2
     tail -200 "$BREW_LOG" >&2 || true
+  fi
+  if [[ -f "$APP_LOG" ]]; then
+    echo "==> $APP_LOG" >&2
+    tail -200 "$APP_LOG" >&2 || true
   fi
   if [[ -d "$APP" ]]; then
     echo "==> Installed app bundle" >&2
@@ -75,15 +80,12 @@ for _ in {1..30}; do
 done
 test "$SERVICE_STATE" = "started" || test "$SERVICE_STATE" = "scheduled"
 
-open -n "$APP"
-APP_PID=""
-for _ in {1..30}; do
-  APP_PID="$(pgrep -f "$APP/Contents/MacOS/" | head -1 || true)"
-  [[ -n "$APP_PID" ]] && break
-  sleep 1
-done
-test -n "$APP_PID"
+"$APP/Contents/MacOS/microbridge-ui" >"$APP_LOG" 2>&1 &
+APP_PID=$!
+sleep 3
+kill -0 "$APP_PID"
 kill "$APP_PID" || true
+wait "$APP_PID" || true
 
 brew services stop "$TAP/microbridge"
 HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge"

@@ -75,15 +75,16 @@ jobs:
             tail -200 "$(brew --prefix)/var/log/microbridge.log" || true
             exit 1
           fi
-          open -n "$APP"
-          APP_PID=""
-          for _ in {1..30}; do
-            APP_PID="$(pgrep -f "$APP/Contents/MacOS/" | head -1 || true)"
-            [[ -n "$APP_PID" ]] && break
-            sleep 1
-          done
-          test -n "$APP_PID"
+          APP_LOG="$RUNNER_TEMP/microbridge-app.log"
+          "$APP/Contents/MacOS/microbridge-ui" >"$APP_LOG" 2>&1 &
+          APP_PID=$!
+          sleep 3
+          if ! kill -0 "$APP_PID"; then
+            cat "$APP_LOG"
+            exit 1
+          fi
           kill "$APP_PID" || true
+          wait "$APP_PID" || true
           brew services stop DevVig/microbridge/microbridge
           HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall DevVig/microbridge/microbridge
           if brew services list | grep -q '^microbridge[[:space:]]'; then
