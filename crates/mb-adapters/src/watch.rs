@@ -1,5 +1,6 @@
 //! Shared recursive directory watcher (event-driven via `notify`).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::thread;
@@ -79,6 +80,12 @@ fn is_session_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e == "json" || e == "jsonl")
+}
+
+/// True when any path component equals `needle` (e.g. `subagents`).
+pub fn path_components_contain(path: &Path, needle: &str) -> bool {
+    let needle = OsStr::new(needle);
+    path.components().any(|c| c.as_os_str() == needle)
 }
 
 fn scan_recent(root: &Path, on_change: &mut impl FnMut(PathBuf)) {

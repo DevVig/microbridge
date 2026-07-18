@@ -2,6 +2,9 @@
 
 /// Collapse whitespace and truncate for menu-bar display.
 pub fn clean_title(raw: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
     let collapsed: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = collapsed.trim();
     if trimmed.is_empty() {
@@ -18,8 +21,7 @@ pub fn clean_title(raw: &str, max_chars: usize) -> String {
 /// Skip system / sandbox boilerplate that isn't a real user ask.
 pub fn looks_like_boilerplate(text: &str) -> bool {
     let t = text.trim_start();
-    t.starts_with('<')
-        || t.starts_with("# Repository Guidelines")
+    t.starts_with("# Repository Guidelines")
         || t.starts_with("# Project Agents")
         || t.starts_with("Synara plan mode is active")
         || t.starts_with("I'm evaluating whether")
@@ -58,11 +60,13 @@ mod tests {
     fn cleans_and_truncates() {
         assert_eq!(clean_title("  hello   world  ", 32), "hello world");
         assert!(clean_title("abcdefghij", 6).ends_with('…'));
+        assert_eq!(clean_title("anything", 0), "");
     }
 
     #[test]
     fn rejects_boilerplate() {
         assert!(looks_like_boilerplate("<environment_context>\nfoo"));
         assert!(!looks_like_boilerplate("Fix the flaky e2e retries"));
+        assert!(!looks_like_boilerplate("<Button> crashes on click"));
     }
 }

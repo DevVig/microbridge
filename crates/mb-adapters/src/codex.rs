@@ -14,7 +14,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::title::{clean_title, cwd_basename, looks_like_boilerplate};
-use crate::watch::watch_dir;
+use crate::watch::{path_components_contain, watch_dir};
 use crate::{AdapterEvent, AdapterTx};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -27,10 +27,29 @@ pub fn spawn_codex_adapter(tx: AdapterTx) {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let root = PathBuf::from(home).join(".codex").join("sessions");
     let seen: Arc<Mutex<HashMap<String, Fingerprint>>> = Arc::new(Mutex::new(HashMap::new()));
+    let path_ids: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let seen_cb = Arc::clone(&seen);
+    let path_ids_cb = Arc::clone(&path_ids);
     watch_dir(root, move |path| {
+        if path_components_contain(&path, "subagents") {
+            return;
+        }
+        let path_key = path.to_string_lossy().into_owned();
+        if !path.exists() {
+            let id = path_ids_cb.lock().unwrap().remove(&path_key);
+            if let Some(id) = id {
+                seen_cb.lock().unwrap().remove(&id);
+                debug!(%id, "codex session removed");
+                let _ = tx.send(AdapterEvent::Remove(id));
+            }
+            return;
+        }
         if let Some(session) = parse_codex_session(&path) {
+            path_ids_cb
+                .lock()
+                .unwrap()
+                .insert(path_key, session.id.clone());
             let fp = Fingerprint {
                 state: session.state,
                 title: session.title.clone(),

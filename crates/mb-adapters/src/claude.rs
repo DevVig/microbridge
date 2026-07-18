@@ -5,7 +5,7 @@
 //! name is the fallback.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -14,7 +14,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::title::{clean_title, looks_like_boilerplate, project_label_from_path};
-use crate::watch::watch_dir;
+use crate::watch::{path_components_contain, watch_dir};
 use crate::{AdapterEvent, AdapterTx};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -36,12 +36,28 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
     for root in candidates {
         let tx = tx.clone();
         let seen: Arc<Mutex<HashMap<String, Fingerprint>>> = Arc::new(Mutex::new(HashMap::new()));
+        let path_ids: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_cb = Arc::clone(&seen);
+        let path_ids_cb = Arc::clone(&path_ids);
         watch_dir(root, move |path| {
             if path_components_contain(&path, "subagents") {
                 return;
             }
+            let path_key = path.to_string_lossy().into_owned();
+            if !path.exists() {
+                let id = path_ids_cb.lock().unwrap().remove(&path_key);
+                if let Some(id) = id {
+                    seen_cb.lock().unwrap().remove(&id);
+                    debug!(%id, "claude session removed");
+                    let _ = tx.send(AdapterEvent::Remove(id));
+                }
+                return;
+            }
             if let Some(session) = parse_claude_session(&path) {
+                path_ids_cb
+                    .lock()
+                    .unwrap()
+                    .insert(path_key, session.id.clone());
                 let fp = Fingerprint {
                     state: session.state,
                     title: session.title.clone(),
@@ -57,10 +73,6 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
             }
         });
     }
-}
-
-fn path_components_contain(path: &Path, needle: &str) -> bool {
-    path.components().any(|c| c.as_os_str() == needle)
 }
 
 fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
