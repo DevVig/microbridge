@@ -10,6 +10,16 @@ EXPECTED_ARCH="${3:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 TAP="devvig/microbridge-ci"
 APP="$HOME/Applications/Microbridge.app"
 
+cleanup() {
+  brew services stop "$TAP/microbridge" >/dev/null 2>&1 || true
+  HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge" >/dev/null 2>&1 || true
+  if [[ -f "$APP/.microbridge-brew" ]]; then
+    rm -rf "$APP"
+  fi
+  brew untap "$TAP" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
 test "$(uname -m)" = "$EXPECTED_ARCH"
 brew tap-new "$TAP"
 TAP_PATH="$(brew --repo "$TAP")"
@@ -55,3 +65,5 @@ fi
 test -f "$APP/.microbridge-brew"
 rm -rf "$APP"
 test ! -e "$APP"
+brew untap "$TAP"
+trap - EXIT

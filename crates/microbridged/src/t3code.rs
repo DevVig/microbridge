@@ -526,13 +526,20 @@ async fn dispatch_action(
     let command_id = format!("microbridge-{}", now_ms());
     let created_at = now_iso();
     let command = match action {
-        Action::Interrupt => json!({
-            "type": "thread.turn.interrupt",
-            "commandId": command_id,
-            "threadId": thread.id,
-            "turnId": thread.latest_turn.as_ref().map(|turn| turn.turn_id.clone()),
-            "createdAt": created_at,
-        }),
+        Action::Interrupt => {
+            let turn_id = thread
+                .latest_turn
+                .as_ref()
+                .map(|turn| turn.turn_id.clone())
+                .ok_or_else(|| "T3 Code has no active turn to interrupt.".to_string())?;
+            json!({
+                "type": "thread.turn.interrupt",
+                "commandId": command_id,
+                "threadId": thread.id,
+                "turnId": turn_id,
+                "createdAt": created_at,
+            })
+        }
         Action::Approve | Action::Reject => {
             let request_id = fetch_pending_approval_id(client, credential, &thread.id).await?;
             json!({
@@ -683,5 +690,33 @@ mod tests {
         assert!(!contract_is_supported("0.0.27"));
         assert!(!contract_is_supported("0.0.29"));
         assert_eq!(PINNED_CONTRACT_COMMIT.len(), 40);
+    }
+
+    #[tokio::test]
+    async fn interrupt_requires_an_active_turn_id() {
+        let thread = ThreadShell {
+            id: "thread-1".into(),
+            title: "Test".into(),
+            _model_selection: json!({}),
+            latest_turn: None,
+            session: None,
+            has_pending_approvals: false,
+            updated_at: "2026-07-18T12:00:00Z".into(),
+        };
+        let credential = T3Credential {
+            http_base_url: "https://t3.example.test/".into(),
+            bearer_token: "unused".into(),
+        };
+
+        let error = dispatch_action(
+            &reqwest::Client::new(),
+            &credential,
+            &thread,
+            Action::Interrupt,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "T3 Code has no active turn to interrupt.");
     }
 }
