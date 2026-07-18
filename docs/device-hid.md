@@ -118,6 +118,10 @@ Build flag: `mb-device` feature `hid` (on by default). Disable with
 
 ## Remaining validation (needs hardware)
 
+Run the [hardware bring-up runbook](hardware-bringup.md) — it drives each of
+these with exact commands. `microbridgectl hid-capture` harvests item 2 in one
+pass.
+
 1. Confirm live PID/iProduct string on the shipping Codex Micro unit
 2. Map `v.oai.hid` key strings → Agent Key indices / Approve / Reject / etc.
 3. Confirm double-press window (ChatGPT uses ≤350ms) for Agent Keys

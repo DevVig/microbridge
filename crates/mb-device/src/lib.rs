@@ -12,7 +12,12 @@ mod probe;
 mod rpc;
 
 #[cfg(feature = "hid")]
+mod capture;
+#[cfg(feature = "hid")]
 mod claim;
+
+#[cfg(feature = "hid")]
+pub use capture::run_capture;
 
 pub use framing::{frame_rpc, parse_report, CHANNEL_DEBUG, CHANNEL_RPC, REPORT_ID};
 pub use ids::{is_supported_pid, CODEX_MICRO_PID, WL_MANUFACTURERS, WL_USAGE_PAGE, WL_VID};
@@ -385,5 +390,52 @@ pub fn open_default_device() -> Box<dyn Device> {
         Box::new(hid)
     } else {
         Box::new(MockDevice::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Characterization tests: these lock in the *current guessed* mapping so a
+    // regression is visible. The real `v.oai.hid` strings get confirmed with a
+    // physical unit via `microbridgectl hid-capture` — see
+    // docs/hardware-bringup.md. Update these alongside the real map.
+
+    #[test]
+    fn agent_key_index_prefers_one_based_forms() {
+        // ChatGPT ships `agent1..agent6`; treat 1..=6 as one-based (0..=5).
+        assert_eq!(agent_key_index("agent1"), Some(0));
+        assert_eq!(agent_key_index("agent6"), Some(5));
+        assert_eq!(agent_key_index("k3"), Some(2));
+    }
+
+    #[test]
+    fn agent_key_index_accepts_zero_based_zero() {
+        // A bare 0 can only mean the first key.
+        assert_eq!(agent_key_index("agent0"), Some(0));
+        assert_eq!(agent_key_index("0"), Some(0));
+    }
+
+    #[test]
+    fn agent_key_index_rejects_out_of_range_and_digitless() {
+        assert_eq!(agent_key_index("agent7"), None);
+        assert_eq!(agent_key_index("approve"), None);
+        assert_eq!(agent_key_index(""), None);
+    }
+
+    #[test]
+    fn joystick_angle_maps_to_cardinals() {
+        let dir = |a| match joystick_from_angle(a) {
+            Some(DeviceInput::JoystickFlick { direction }) => direction,
+            other => panic!("expected a flick, got {other:?}"),
+        };
+        assert_eq!(dir(0), JoystickDir::Up);
+        assert_eq!(dir(90), JoystickDir::Right);
+        assert_eq!(dir(180), JoystickDir::Down);
+        assert_eq!(dir(270), JoystickDir::Left);
+        // Wraps: 360 ≡ 0, and negatives normalize via rem_euclid.
+        assert_eq!(dir(360), JoystickDir::Up);
+        assert_eq!(dir(-90), JoystickDir::Left);
     }
 }

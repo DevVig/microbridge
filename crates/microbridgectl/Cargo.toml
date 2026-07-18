@@ -10,7 +10,13 @@ repository.workspace = true
 name = "microbridgectl"
 path = "src/main.rs"
 
+[features]
+default = ["hid"]
+## Enables the `hid-capture` command (pulls in `mb-device` + `hidapi`).
+hid = ["dep:mb-device", "mb-device/hid"]
+
 [dependencies]
 mb-protocol = { path = "../mb-protocol" }
+mb-device = { path = "../mb-device", optional = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

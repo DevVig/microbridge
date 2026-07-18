@@ -129,6 +129,8 @@ Adapter PRs are explicitly welcome — that is the point of the project. Start w
 
 Microbridge is an independent community project. It is not affiliated with or endorsed by Work Louder or OpenAI. Driving the Micro's LEDs outside official software relies on best-effort reverse engineering of the device's HID protocol and may lag firmware updates.
 
+This project is only possible because OpenAI chose to keep the Micro open — an open protocol, a non-exclusive HID interface, and open tooling. That is a real choice, and we're grateful for it: see [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
+
 ## License
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Contributions are accepted under the same terms.
