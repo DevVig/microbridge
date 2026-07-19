@@ -10,7 +10,7 @@ import {
 import { promptLaunchAtLoginOnce } from "./lib/autostart";
 import { resolveAppearance } from "./lib/theme";
 import type { DaemonConfig, Snapshot } from "./lib/types";
-import { autoCheckEnabled, runUpdateCheck } from "./lib/updater";
+import { runAutomaticUpdateCheck, runUpdateCheck } from "./lib/updater";
 import { Disconnected } from "./surfaces/Disconnected";
 import { Hud } from "./surfaces/Hud";
 import { Popover } from "./surfaces/Popover";
@@ -63,9 +63,7 @@ export default function App() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
-    if (autoCheckEnabled()) {
-      void runUpdateCheck({ silent: true });
-    }
+    void runAutomaticUpdateCheck();
     void promptLaunchAtLoginOnce();
 
     void (async () => {

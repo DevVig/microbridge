@@ -789,15 +789,15 @@ export function Settings({
                   setAutoCheckEnabled(e.target.checked);
                 }}
               />
-              Check for updates automatically when Microbridge starts
+              Check for updates automatically (at most once a day)
             </label>
             <p
               className="mt-2 max-w-md text-[11px]"
               style={{ color: t.textMuted }}
             >
-              Off by default. When on, Microbridge quietly checks once at launch
-              and only speaks up if an update is ready. No background polling,
-              ever.
+              Off by default. When on, Microbridge quietly checks at launch only
+              if 24 hours have passed, and speaks up only when an update is ready.
+              No background polling, ever.
             </p>
           </section>
         )}

@@ -9,6 +9,21 @@
  */
 
 const AUTO_CHECK_KEY = "microbridge.autoCheckUpdates";
+const LAST_AUTO_CHECK_KEY = "microbridge.lastAutoCheckAt";
+const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export function automaticUpdateCheckDue(
+  lastAttempt: string | null,
+  now = Date.now(),
+): boolean {
+  const last = Number(lastAttempt);
+  return (
+    !Number.isFinite(last) ||
+    last <= 0 ||
+    last > now ||
+    now - last >= AUTO_CHECK_INTERVAL_MS
+  );
+}
 
 /** Opt-in launch check — defaults off to honor "no update pings" by default. */
 export function autoCheckEnabled(): boolean {
@@ -25,6 +40,28 @@ export function setAutoCheckEnabled(value: boolean): void {
   } catch {
     /* no persistent storage — nothing to do */
   }
+}
+
+/**
+ * Run the opt-in background check at most once per 24 hours.
+ *
+ * The timestamp is recorded when the attempt starts, not only on success, so a
+ * temporary network failure cannot turn every app restart into another ping.
+ * Manual checks bypass this throttle.
+ */
+export async function runAutomaticUpdateCheck(): Promise<void> {
+  if (!autoCheckEnabled()) return;
+  try {
+    const now = Date.now();
+    if (!automaticUpdateCheckDue(localStorage.getItem(LAST_AUTO_CHECK_KEY), now)) {
+      return;
+    }
+    localStorage.setItem(LAST_AUTO_CHECK_KEY, String(now));
+  } catch {
+    // Without durable storage there is no honest way to enforce once a day.
+    return;
+  }
+  await runUpdateCheck({ silent: true });
 }
 
 async function invokeCmd<T>(cmd: string): Promise<T | null> {
