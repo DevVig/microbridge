@@ -3,6 +3,7 @@ export interface ThemeTokens {
   frame: string;
   panel: string;
   panelBorder: string;
+  floatingShadow: string;
   sunken: string;
   hairline: string;
   text: string;
@@ -16,6 +17,8 @@ export const LIGHT: ThemeTokens = {
   frame: "#E9E9E7",
   panel: "rgba(252,252,251,0.88)",
   panelBorder: "rgba(0,0,0,0.10)",
+  floatingShadow:
+    "0 8px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10)",
   sunken: "#F4F4F2",
   hairline: "rgba(0,0,0,0.08)",
   text: "#0D0D0D",
@@ -29,6 +32,8 @@ export const DARK: ThemeTokens = {
   frame: "#0A0A0B",
   panel: "rgba(26,26,28,0.90)",
   panelBorder: "rgba(255,255,255,0.10)",
+  floatingShadow:
+    "0 8px 20px rgba(0,0,0,0.38), 0 1px 4px rgba(0,0,0,0.22)",
   sunken: "rgba(0,0,0,0.24)",
   hairline: "rgba(255,255,255,0.09)",
   text: "#F5F5F4",

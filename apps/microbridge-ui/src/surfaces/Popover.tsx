@@ -152,8 +152,7 @@ export function Popover({
           maxHeight,
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,
-          boxShadow:
-            "0 24px 64px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.12)",
+          boxShadow: t.floatingShadow,
         }}
       >
         <div className="flex items-center gap-2 px-4 pb-3 pt-3.5">

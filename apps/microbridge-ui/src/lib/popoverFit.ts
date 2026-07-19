@@ -18,13 +18,13 @@ import { invokeQuiet, invokeTauri } from "./tauri";
 
 /**
  * Space the window needs beyond the card itself: the wrapper's `pt-1` (4px),
- * plus slack for the card's drop shadow (`0 24px 64px` reaches ~56px below it).
+ * plus slack for the card's compact drop shadow (`0 8px 20px` reaches ~18px below it).
  * Without the slack a window hugging the card would clip its own shadow.
  *
  * One constant governs both directions — it's added when asking for a window
  * size and subtracted when capping the card — so the two can't drift apart.
  */
-export const POPOVER_CHROME = 4 + 52;
+export const POPOVER_CHROME = 4 + 22;
 
 /**
  * Card height below which the popover has to choose what to spend space on.
