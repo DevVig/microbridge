@@ -13,6 +13,7 @@ use mb_protocol::{AgentState, SessionStatus};
 use serde_json::Value;
 use tracing::debug;
 
+use crate::hosts::host_from_cwd;
 use crate::title::{clean_title, cwd_basename, looks_like_boilerplate};
 use crate::watch::{path_components_contain, watch_dir};
 use crate::{AdapterEvent, AdapterTx};
@@ -87,6 +88,9 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
         match value.get("type").and_then(|v| v.as_str()) {
             Some("session_meta") => {
                 let payload = value.get("payload").unwrap_or(&value);
+                if is_subagent_source(payload.get("source")) {
+                    return None;
+                }
                 if let Some(raw) = payload.get("id").and_then(|v| v.as_str()) {
                     id = Some(raw.to_string());
                 }
@@ -168,26 +172,52 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
 /// Name the application hosting a Codex session rather than assuming every
 /// Codex rollout was launched from the standalone CLI.
 ///
-/// T3 Code deliberately wraps `codex app-server`, so its journals live in the
-/// same `~/.codex/sessions` store. Current T3 releases provide the authoritative
-/// `t3code_desktop` originator. The `.t3` worktree check keeps older T3 journals
-/// correctly attributed without inspecting processes or private T3 storage.
+/// `~/.codex/sessions` is a shared store: the interactive CLI, `codex exec`,
+/// the Codex desktop app, and every app that wraps `codex app-server` (T3 Code,
+/// Synara, …) all journal here. Recent Codex builds record an `originator`,
+/// which is authoritative; `cwd` covers older journals from before that field
+/// existed, since these hosts keep their worktrees under their own home.
 fn codex_app_label(originator: Option<&str>, cwd: Option<&str>) -> String {
-    if originator.is_some_and(|value| value.starts_with("t3code")) || is_t3_cwd(cwd) {
-        "T3 Code".into()
-    } else {
-        "Codex CLI".into()
+    // (lowercased originator prefix, display name). Prefix-matched because
+    // hosts suffix the field — `t3code_desktop`, `codex_work_desktop`.
+    //
+    // Deliberately no catch-all `codex` entry: the CLI's own originator is
+    // `codex_cli_rs`, so a greedy prefix would relabel real CLI sessions as the
+    // desktop app. An unrecognized originator falls through to `cwd` and then
+    // to the historical default, which is wrong for at most the name of a host
+    // we have never seen — never wrong about one we have.
+    const ORIGINATORS: &[(&str, &str)] = &[
+        ("t3code", "T3 Code"),
+        ("synara", "Synara"),
+        ("codex desktop", "Codex Desktop"),
+        ("codex_work_desktop", "Codex Desktop"),
+    ];
+
+    if let Some(originator) = originator {
+        let originator = originator.to_ascii_lowercase();
+        if let Some((_, name)) = ORIGINATORS
+            .iter()
+            .find(|(prefix, _)| originator.starts_with(prefix))
+        {
+            return (*name).into();
+        }
     }
+    host_from_cwd(cwd).unwrap_or("Codex CLI").into()
 }
 
-fn is_t3_cwd(cwd: Option<&str>) -> bool {
-    let Some(cwd) = cwd else {
-        return false;
-    };
-    let Ok(home) = std::env::var("HOME") else {
-        return false;
-    };
-    cwd.starts_with(&format!("{home}/.t3/"))
+/// Rollouts a session spawned as subagents of its own.
+///
+/// Codex writes these into the same dated directory as ordinary sessions and
+/// marks them only inside `session_meta.source`, so the `subagents` path filter
+/// in the watcher never matches one. They are steps *within* a session the user
+/// can already see, and there are routinely more of them than there are real
+/// sessions — left in, they bury the list the popover exists to show.
+fn is_subagent_source(source: Option<&Value>) -> bool {
+    match source {
+        Some(Value::Object(map)) => map.contains_key("subagent"),
+        Some(Value::String(name)) => name == "subagent",
+        _ => false,
+    }
 }
 
 fn file_mtime_ms(path: &std::path::Path) -> Option<u64> {
@@ -250,6 +280,77 @@ mod tests {
         let session = parse_codex_session(&path).unwrap();
         assert_eq!(session.id, "codex:t3-1");
         assert_eq!(session.app, "T3 Code");
+    }
+
+    #[test]
+    fn labels_sdk_hosts_and_the_codex_app_from_originator() {
+        // The CLI's own originator must survive the desktop-app entries.
+        assert_eq!(codex_app_label(Some("codex_cli_rs"), None), "Codex CLI");
+        assert_eq!(codex_app_label(Some("codex-tui"), None), "Codex CLI");
+        assert_eq!(codex_app_label(Some("codex_exec"), None), "Codex CLI");
+
+        assert_eq!(codex_app_label(Some("synara_desktop"), None), "Synara");
+        assert_eq!(codex_app_label(Some("t3code_desktop"), None), "T3 Code");
+        // The desktop app writes a display-cased originator.
+        assert_eq!(
+            codex_app_label(Some("Codex Desktop"), None),
+            "Codex Desktop"
+        );
+        assert_eq!(
+            codex_app_label(Some("codex_work_desktop"), None),
+            "Codex Desktop"
+        );
+
+        // Unknown host, no locating cwd → historical default rather than a
+        // guess.
+        assert_eq!(
+            codex_app_label(Some("some_future_ide"), Some("/Users/me/dev/repo")),
+            "Codex CLI"
+        );
+    }
+
+    #[test]
+    fn labels_pre_originator_journal_from_host_worktree() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            codex_app_label(None, Some(&format!("{home}/.synara/worktrees/app/branch"))),
+            "Synara"
+        );
+    }
+
+    #[test]
+    fn skips_subagent_rollouts() {
+        let dir = tempfile_dir();
+        let path = dir.join("subagent.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        // Shape as written by Codex: a normal rollout in a normal dated
+        // directory, distinguishable only by `source`.
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"sub-1","cwd":"/Users/me/dev/repo","originator":"Codex Desktop","source":{{"subagent":{{"thread_spawn":{{"parent_thread_id":"parent-1","depth":1}}}}}}}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"event_msg","payload":{{"type":"user_message","message":"Review the billing bridge"}}}}"#
+        )
+        .unwrap();
+        assert!(parse_codex_session(&path).is_none());
+    }
+
+    #[test]
+    fn keeps_ordinary_rollouts_with_a_plain_source() {
+        let dir = tempfile_dir();
+        let path = dir.join("vscode-source.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"top-1","cwd":"/Users/me/dev/repo","originator":"synara_desktop","source":"vscode"}}}}"#
+        )
+        .unwrap();
+        let session = parse_codex_session(&path).unwrap();
+        assert_eq!(session.id, "codex:top-1");
+        assert_eq!(session.app, "Synara");
     }
 
     #[test]

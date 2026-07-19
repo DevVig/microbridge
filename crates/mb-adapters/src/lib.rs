@@ -5,6 +5,7 @@
 
 mod claude;
 mod codex;
+mod hosts;
 mod title;
 mod watch;
 
