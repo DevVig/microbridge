@@ -13,6 +13,7 @@ use mb_protocol::{AgentState, SessionStatus};
 use serde_json::Value;
 use tracing::debug;
 
+use crate::hosts::host_from_cwd;
 use crate::title::{clean_title, looks_like_boilerplate, project_label_from_path};
 use crate::watch::{path_components_contain, watch_dir};
 use crate::{AdapterEvent, AdapterTx};
@@ -181,29 +182,6 @@ fn claude_app_label(entrypoint: Option<&str>, cwd: Option<&str>) -> String {
         // Missing/unknown entrypoint: keep the historical default.
         _ => "Claude Code".into(),
     }
-}
-
-/// Map a session `cwd` to the embedding host when it lives under that host's
-/// home directory. Purely path-based, so it names the host for worktree
-/// sessions without touching the host at all.
-fn host_from_cwd(cwd: Option<&str>) -> Option<&'static str> {
-    let cwd = cwd?;
-    let home = std::env::var("HOME").ok()?;
-    // (home-relative dir, display name) — Synara / T3 Code / Cursor all share
-    // the Claude journal store; cwd under the host home names the IDE so
-    // focused_app can scope Agent Keys the same way for each.
-    const HOSTS: &[(&str, &str)] = &[
-        (".synara", "Synara"),
-        (".t3", "T3 Code"),
-        (".cursor", "Cursor"),
-    ];
-    for (dir, name) in HOSTS {
-        let prefix = format!("{home}/{dir}/");
-        if cwd.starts_with(&prefix) {
-            return Some(name);
-        }
-    }
-    None
 }
 
 fn extract_text(value: &Value) -> Option<String> {
