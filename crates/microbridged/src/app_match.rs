@@ -7,15 +7,26 @@
 
 /// True when two app names refer to the same IDE family.
 pub fn same_app(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
     app_family(a) == app_family(b)
 }
 
 /// Collapse display / frontmost names to a stable family key.
 pub fn app_family(name: &str) -> String {
     let trimmed = name.trim();
-    let base = strip_channel_suffix(trimmed);
-    let lower = base.to_ascii_lowercase();
+    // Common canonical session labels — skip lowercasing/allocation work.
+    if let Some(family) = canonical_family(trimmed) {
+        return family.into();
+    }
 
+    let base = strip_channel_suffix(trimmed);
+    if let Some(family) = canonical_family(base) {
+        return family.into();
+    }
+
+    let lower = base.to_ascii_lowercase();
     if is_t3(&lower) {
         return "t3".into();
     }
@@ -36,6 +47,18 @@ pub fn app_family(name: &str) -> String {
     }
     // "Claude Agent SDK" stays its own label (unknown embedders).
     lower
+}
+
+fn canonical_family(name: &str) -> Option<&'static str> {
+    match name {
+        "T3 Code" => Some("t3"),
+        "Cursor" => Some("cursor"),
+        "Synara" => Some("synara"),
+        "Codex CLI" => Some("codex"),
+        "Claude Code" => Some("claude_code"),
+        "Claude Desktop" => Some("claude_desktop"),
+        _ => None,
+    }
 }
 
 fn strip_channel_suffix(name: &str) -> &str {
