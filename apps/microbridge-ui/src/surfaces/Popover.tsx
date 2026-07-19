@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/types";
 import { STATE_COLORS, STATE_LABELS, elapsed } from "../lib/types";
 import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
-import { visibleThreads } from "../lib/threads";
+import {
+  THREAD_ROW_HEIGHT,
+  VISIBLE_THREAD_ROWS,
+  visibleThreads,
+} from "../lib/threads";
+import { usePopoverFit } from "../lib/popoverFit";
 import { DeviceEcho } from "../components/DeviceEcho";
-import { fitPopover } from "../lib/bus";
 
 const MicroGlyph = ({ color }: { color: string }) => (
   <svg
@@ -78,6 +81,7 @@ export function Popover({
   onAgentKey?: (index: number, open: boolean) => void;
 }) {
   const t = dark ? DARK : LIGHT;
+  const { ref: cardRef, maxHeight, compact } = usePopoverFit<HTMLDivElement>();
   const demo = snapshot.device_name === "demo-browser";
   const simulator = snapshot.device_name === "mock" || demo;
   const daemonOffline = snapshot.device_name === "daemon-offline";
@@ -106,29 +110,6 @@ export function Popover({
   );
   const liveCount = snapshot.agent_key_session_ids.filter(Boolean).length;
   const { threads, total, truncated } = visibleThreads(snapshot);
-  const adapterLayoutKey = snapshot.adapters
-    .map((adapter) => `${adapter.id}:${adapter.state}:${adapter.diagnostic}`)
-    .join("|");
-  const cardRef = useRef<HTMLDivElement>(null);
-  const threadListRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const card = cardRef.current;
-    if (!card) return;
-    const measure = () => {
-      const threadList = threadListRef.current;
-      const current = card.getBoundingClientRect().height;
-      const desired = threadList
-        ? current - threadList.clientHeight + threadList.scrollHeight + 8
-        : card.scrollHeight + 8;
-      void fitPopover(Math.ceil(desired));
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(card);
-    if (threadListRef.current) observer.observe(threadListRef.current);
-    measure();
-    return () => observer.disconnect();
-  }, [threads.length, snapshot.device_connected, snapshot.device_name, adapterLayoutKey]);
 
   const footerButton = (
     label: string,
@@ -159,10 +140,16 @@ export function Popover({
       className="flex h-screen w-full items-start justify-center overflow-hidden bg-transparent pt-1"
       style={{ fontFamily: "Inter, system-ui, sans-serif" }}
     >
+      {/* The thread list scrolls so the footer stays put — without this, a full
+          list pushed Settings/Pause/Quit off the bottom of a fixed window.
+          `maxHeight` is the room left below the menu bar on this monitor; the
+          class is the browser-preview fallback for when there's no Tauri to
+          ask. The window itself then hugs this card — see usePopoverFit. */}
       <div
         ref={cardRef}
-        className="mb-frost flex max-h-[calc(100vh-4px)] w-[360px] flex-col overflow-hidden rounded-2xl"
+        className="mb-frost flex max-h-[calc(100vh-8px)] w-[360px] flex-col overflow-hidden rounded-2xl"
         style={{
+          maxHeight,
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,
           boxShadow:
@@ -274,15 +261,25 @@ export function Popover({
               )}
             </div>
 
-            <div className="flex justify-center px-3 pb-3">
-              <DeviceEcho t={t} snapshot={snapshot} onAgentKey={onAgentKey} />
-            </div>
+            {/* First thing to go when the screen can't hold everything — see
+                COMPACT_CARD_HEIGHT. Threads outrank the device picture. */}
+            {!compact && (
+              <div className="flex justify-center px-3 pb-3">
+                <DeviceEcho
+                  t={t}
+                  snapshot={snapshot}
+                  onAgentKey={onAgentKey}
+                />
+              </div>
+            )}
 
             <div
               className="flex min-h-0 flex-1 flex-col px-3 pb-2"
               style={{ borderTop: `1px solid ${t.hairline}` }}
             >
-              <div className="flex items-center justify-between px-2 pb-1 pt-2.5">
+              {/* Outside the scroll region: with a scrolling list this label
+                  would otherwise scroll away from the rows it describes. */}
+              <div className="flex shrink-0 items-center justify-between px-2 pb-1 pt-2.5">
                 <span
                   className="text-[11px] font-semibold"
                   style={{ color: t.textSecondary }}
@@ -294,55 +291,65 @@ export function Popover({
                   style={{ color: t.textMuted }}
                 >
                   {liveCount} on keys
-                  {truncated ? ` · ${threads.length}/${total}` : ""}
+                  {truncated
+                    ? ` · ${threads.length}/${total}`
+                    : total > VISIBLE_THREAD_ROWS
+                      ? ` · ${total} threads`
+                      : ""}
                 </span>
               </div>
-              {threads.length === 0 ? (
-                <p
-                  className="px-2 py-2 text-[12px]"
-                  style={{ color: t.textMuted }}
-                >
-                  No live sessions
-                </p>
-              ) : (
-                <div ref={threadListRef} className="mb-scrollbar min-h-0 overflow-y-auto">
-                  {threads.map((s) => (
+              {/* Shows VISIBLE_THREAD_ROWS and scrolls for the rest. A shorter
+                  screen shrinks the card first, so this is an upper bound. */}
+              <div
+                className="mb-scrollbar min-h-0 flex-1 overflow-y-auto"
+                style={{ maxHeight: VISIBLE_THREAD_ROWS * THREAD_ROW_HEIGHT }}
+              >
+                {threads.length === 0 ? (
+                  <p
+                    className="px-2 py-2 text-[12px]"
+                    style={{ color: t.textMuted }}
+                  >
+                    No live sessions
+                  </p>
+                ) : (
+                  threads.map((s) => (
                     <button
                       type="button"
                       key={s.id}
+                      className="flex items-center gap-2 rounded-lg px-2"
+                      style={{ height: THREAD_ROW_HEIGHT }}
                       onClick={() => {
                         const index = snapshot.agent_key_session_ids.indexOf(s.id);
                         if (index >= 0) onAgentKey?.(index, false);
                       }}
                       disabled={!snapshot.agent_key_session_ids.includes(s.id)}
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5"
                     >
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: STATE_COLORS[s.state] }}
-                    />
-                    <span
-                      className="w-[72px] truncate text-[11px]"
-                      style={{ color: t.textSecondary }}
-                    >
-                      {s.app}
-                    </span>
-                    <span
-                      className="min-w-0 flex-1 truncate text-[12px]"
-                      style={{ color: t.text }}
-                    >
-                      {s.title || s.id}
-                    </span>
-                    <span
-                      className="text-[10.5px] tabular-nums"
-                      style={{ color: t.textMuted }}
-                    >
-                      {elapsed(s.updated_at_ms)}
-                    </span>
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: STATE_COLORS[s.state] }}
+                      />
+                      <span
+                        className="w-[72px] truncate text-[11px]"
+                        style={{ color: t.textSecondary }}
+                      >
+                        {s.app}
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 truncate text-[12px]"
+                        style={{ color: t.text }}
+                      >
+                        {s.title || s.id}
+                      </span>
+                      <span
+                        className="text-[10.5px] tabular-nums"
+                        style={{ color: t.textMuted }}
+                      >
+                        {elapsed(s.updated_at_ms)}
+                      </span>
                     </button>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </>
         ) : (
@@ -366,7 +373,7 @@ export function Popover({
         )}
 
         <div
-          className="flex items-center gap-1 px-2.5 py-2"
+          className="flex shrink-0 items-center gap-1 px-2.5 py-2"
           style={{ borderTop: `1px solid ${t.hairline}` }}
         >
           {footerButton("Settings", onOpenSettings)}

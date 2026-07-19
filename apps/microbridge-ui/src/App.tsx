@@ -7,15 +7,23 @@ import {
   setConfig,
   subscribeSnapshot,
 } from "./lib/bus";
+import { promptLaunchAtLoginOnce } from "./lib/autostart";
 import { resolveAppearance } from "./lib/theme";
 import type { DaemonConfig, Snapshot } from "./lib/types";
 import { autoCheckEnabled, runUpdateCheck } from "./lib/updater";
+import { Disconnected } from "./surfaces/Disconnected";
 import { Hud } from "./surfaces/Hud";
 import { Popover } from "./surfaces/Popover";
 import { Settings } from "./surfaces/Settings";
 
 type View = "popover" | "settings" | "hud";
-type SettingsTab = "keys" | "agent" | "adapters" | "device" | "updates";
+type SettingsTab =
+  | "general"
+  | "keys"
+  | "agent"
+  | "adapters"
+  | "device"
+  | "updates";
 
 function initialView(): View {
   const q = new URLSearchParams(window.location.search).get("view");
@@ -31,11 +39,16 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let unsub: (() => void) | undefined;
-    void subscribeSnapshot((snap) => {
+    subscribeSnapshot((snap) => {
       if (active) setSnapshot(snap);
-    }).then((u) => {
-      unsub = u;
-    });
+    }).then(
+      (u) => {
+        unsub = u;
+      },
+      () => {
+        /* no bus — the disconnected surface already says so */
+      },
+    );
     return () => {
       active = false;
       unsub?.();
@@ -53,6 +66,7 @@ export default function App() {
     if (autoCheckEnabled()) {
       void runUpdateCheck({ silent: true });
     }
+    void promptLaunchAtLoginOnce();
 
     void (async () => {
       try {
@@ -73,28 +87,33 @@ export default function App() {
     };
   }, [view]);
 
+  // No snapshot means microbridged hasn't sent one yet. The HUD is a transient
+  // overlay with nothing to say here, so it stays blank; the other two surfaces
+  // explain the situation and offer a way out.
   if (!snapshot) {
+    if (view === "hud") return null;
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
-          color: "#6E6E73",
-          background: "transparent",
-        }}
-      >
-        Connecting to microbridged…
-      </div>
+      <Disconnected
+        dark={resolveAppearance("system") === "dark"}
+        view={view}
+        onQuit={() => void quitUi()}
+        onOpenSettings={() => void openSettings()}
+        onClose={() => void closeSettings()}
+      />
     );
   }
 
   const dark = resolveAppearance(snapshot.config.appearance) === "dark";
 
+  // On failure, leave local state alone so the control snaps back to what the
+  // daemon actually has, rather than showing a change that didn't take.
   const applyConfig = async (config: DaemonConfig) => {
-    const next = await setConfig(config);
-    setSnapshot({ ...snapshot, config: next });
+    try {
+      const next = await setConfig(config);
+      setSnapshot({ ...snapshot, config: next });
+    } catch {
+      /* daemon rejected the write — keep showing its last known config */
+    }
   };
 
   if (view === "hud") {

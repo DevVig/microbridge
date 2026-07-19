@@ -132,6 +132,15 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | `~/.microbridge/config.toml` | Key source, lighting, appearance |
 | `~/.microbridge/daemon.log` | launchd / service logs |
 | `~/.cursor/plugins/local/microbridge` | Bundled Cursor lifecycle integration (only after consent) |
+| `~/Library/LaunchAgents/ai.microbridge.ui.plist` | Login item (only if you enable launch at login) |
+
+## Launch at login
+
+The menu bar app asks once, on first launch, whether to start automatically at
+login, and writes the `ai.microbridge.ui` LaunchAgent if you say yes. Toggle it
+any time in **Settings → General**; it takes effect at your next login. This is
+handled by the app rather than the installer, so Homebrew, DMG, and source
+installs all behave the same way.
 
 ## Troubleshooting
 

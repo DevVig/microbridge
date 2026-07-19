@@ -7,8 +7,17 @@ import type { ThemeTokens } from "../lib/theme";
  * White device in both themes; only Agent Key LEDs carry color.
  */
 
-const U = 26;
-const GAP = 6;
+/**
+ * Key unit and gap, in px. Every other measurement here is derived from these,
+ * so the deck scales as one piece.
+ *
+ * These were 26/6. The echo is the single tallest thing in the popover, and at
+ * that size it cost ~193px — enough that a 10-row thread list pushed the card
+ * past 760px, which is a lot of menu bar to take over. Scaled to 18/5 it reads
+ * the same and costs ~145px.
+ */
+const U = 18;
+const GAP = 5;
 
 function MiniAgentKey({
   index,
@@ -42,7 +51,7 @@ function MiniAgentKey({
       onDoubleClick={() => onActivate?.(index, true)}
       aria-label={session ? `Agent Key ${index + 1}: ${session.title || session.id}` : `Agent Key ${index + 1}: unassigned`}
       title={session ? `${session.app} · ${session.title || session.id}` : "Unassigned"}
-      className="relative rounded-[6px]"
+      className="relative rounded-[5px]"
       style={{
         width: U,
         height: U,
@@ -55,18 +64,18 @@ function MiniAgentKey({
     >
       {color && (
         <span
-          className={`absolute inset-[2px] rounded-[4px] ${pulse}`}
+          className={`absolute inset-[2px] rounded-[3px] ${pulse}`}
           style={{
             background: `radial-gradient(circle at 50% 55%, ${color}${focused ? "E6" : "99"} 0%, ${color}33 55%, transparent 80%)`,
           }}
         />
       )}
       <span
-        className="absolute left-1/2 top-1/2 h-[6px] w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
+        className="absolute left-1/2 top-1/2 h-[5px] w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
         style={{ backgroundColor: "rgba(70,70,82,0.3)" }}
       />
       <span
-        className="absolute left-1/2 top-1/2 h-[2px] w-[6px] -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
+        className="absolute left-1/2 top-1/2 h-[1.5px] w-[5px] -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
         style={{ backgroundColor: "rgba(70,70,82,0.3)" }}
       />
     </button>
@@ -76,7 +85,7 @@ function MiniAgentKey({
 function MiniWhiteKey({ wide = false }: { wide?: boolean }) {
   return (
     <span
-      className="rounded-[6px]"
+      className="rounded-[5px]"
       style={{
         width: wide ? U * 2 + GAP : U,
         height: U,
@@ -104,11 +113,9 @@ export function DeviceEcho({
     snapshot.device_name === "mock" ||
     snapshot.device_name.includes("usb");
   return (
-    <div
-      className="flex flex-col items-center gap-2"
-    >
+    <div className="flex flex-col items-center gap-1.5">
       <div
-        className="rounded-[14px] p-[7px]"
+        className="rounded-[12px] p-[6px]"
         style={{
           background:
             "linear-gradient(180deg, rgba(226,226,224,0.6), rgba(206,206,204,0.5))",
@@ -118,7 +125,7 @@ export function DeviceEcho({
         }}
       >
         <div
-          className="rounded-[9px] p-[10px]"
+          className="rounded-[8px] p-[8px]"
           style={{
             background: "linear-gradient(180deg, #FBFBF9 0%, #F2F2EF 100%)",
             border: "1px solid rgba(0,0,0,0.07)",
@@ -140,7 +147,7 @@ export function DeviceEcho({
               <MiniAgentKey index={0} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
               <MiniAgentKey index={1} snapshot={snapshot} connected={connected} onActivate={onAgentKey} />
               <span
-                className="flex items-center justify-center rounded-[7px]"
+                className="flex items-center justify-center rounded-[6px]"
                 style={{
                   width: U,
                   height: U,
@@ -150,8 +157,8 @@ export function DeviceEcho({
                 <span
                   className="rounded-full"
                   style={{
-                    width: U - 6,
-                    height: U - 6,
+                    width: U - 5,
+                    height: U - 5,
                     background:
                       "radial-gradient(circle at 35% 28%, #3E3E44 0%, #202024 55%, #101013 100%)",
                   }}
@@ -178,8 +185,8 @@ export function DeviceEcho({
                 <span
                   className="rounded-full"
                   style={{
-                    width: 13,
-                    height: 13,
+                    width: 10,
+                    height: 10,
                     background:
                       "radial-gradient(circle at 35% 28%, #2E2E33 0%, #131316 70%)",
                   }}
