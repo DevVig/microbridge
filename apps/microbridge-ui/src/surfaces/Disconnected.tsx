@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DARK, LIGHT } from "../lib/theme";
+import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
 import { usePopoverFit } from "../lib/popoverFit";
 import { updateChannel, type UpdateChannel } from "../lib/updater";
 
@@ -127,7 +127,7 @@ function FooterButton({
 }: {
   label: string;
   onClick: () => void;
-  t: typeof LIGHT;
+  t: ThemeTokens;
 }) {
   return (
     <button

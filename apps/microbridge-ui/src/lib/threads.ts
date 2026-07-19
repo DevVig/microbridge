@@ -16,6 +16,7 @@ export const THREAD_ROW_HEIGHT = 28;
  * can't put thousands of rows in the DOM.
  */
 const RENDER_LIMIT = 50;
+
 function rank(session: SessionStatus, snapshot: Snapshot, onKeys: Set<string>): number {
   let score = 0;
   if (session.id === snapshot.focused_session_id) score += 1000;
@@ -53,7 +54,7 @@ export function visibleThreads(
     if (diff !== 0) return diff;
     return b.updated_at_ms - a.updated_at_ms;
   });
-  const threads = ranked;
+  const threads = ranked.slice(0, limit);
   return {
     threads,
     total: snapshot.sessions.length,
