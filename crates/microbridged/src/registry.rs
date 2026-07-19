@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use mb_protocol::{AgentState, DaemonConfig, SessionStatus};
 
+use crate::app_match::same_app;
 use crate::key_source;
 
 #[derive(Debug, Default)]
@@ -77,7 +78,7 @@ impl Registry {
             let front = self
                 .sessions
                 .values()
-                .filter(|s| &s.app == app)
+                .filter(|s| same_app(&s.app, app))
                 .max_by_key(|s| s.updated_at_ms);
             if let Some(session) = front {
                 self.focused = Some(session.id.clone());

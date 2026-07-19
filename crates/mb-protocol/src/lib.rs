@@ -94,10 +94,10 @@ pub enum ClientRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeySource {
-    /// Cross-app: six most recently updated sessions (default).
-    #[default]
+    /// Cross-app: six most recently updated sessions.
     MostRecent,
-    /// All six keys re-populate from whichever app owns the deck.
+    /// Owning IDE's newest sessions (default) — Claude, Codex, Cursor, Synara, T3, …
+    #[default]
     FocusedApp,
     /// Follow the first six pinned session ids.
     Pinned,
@@ -349,7 +349,7 @@ fn default_sleep_minutes() -> u32 {
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
-            key_source: KeySource::MostRecent,
+            key_source: KeySource::FocusedApp,
             pinned_session_ids: Vec::new(),
             app_priority: Vec::new(),
             custom_key_ids: vec![String::new(); AGENT_KEY_COUNT],

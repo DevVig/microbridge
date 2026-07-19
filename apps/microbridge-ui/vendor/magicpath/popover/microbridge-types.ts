@@ -35,7 +35,7 @@ export const SESSIONS: Session[] = [
 { id: 's5', app: 'T3 Code', title: 't3code — session watcher spike', state: 'idle', elapsed: '38m' }];
 
 
-/** Which session each of the six Agent Keys follows (key source: Most recent). */
+/** Which session each of the six Agent Keys follows (key source: Focused app). */
 export const AGENT_KEY_SESSIONS: (Session | null)[] = [SESSIONS[0], SESSIONS[1], SESSIONS[2], SESSIONS[3], SESSIONS[4], null];
 
 export interface ThemeTokens {

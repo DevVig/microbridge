@@ -52,7 +52,7 @@ export const SESSIONS: Session[] = [
 { id: 's5', app: 'T3 Code', title: 't3code — session watcher spike', state: 'idle', elapsed: '38m' }];
 
 
-/** Which session each of the six Agent Keys follows (key source: Most recent). */
+/** Which session each of the six Agent Keys follows (key source: Focused app). */
 export const AGENT_KEY_ASSIGNMENTS: Record<string, string | null> = {
   ag1: 's1',
   ag2: 's2',

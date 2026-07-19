@@ -47,14 +47,14 @@ const KEY_SOURCES: {
   hint: string;
 }[] = [
   {
-    id: "most_recent",
-    label: "Most recent",
-    hint: "Cross-app — six newest threads (default)",
-  },
-  {
     id: "focused_app",
     label: "Focused app",
-    hint: "Repopulate from whichever IDE owns the deck",
+    hint: "Owning IDE — newest threads (Claude, Codex, Cursor, Synara, T3)",
+  },
+  {
+    id: "most_recent",
+    label: "Most recent",
+    hint: "Cross-app — six newest threads",
   },
   {
     id: "pinned",

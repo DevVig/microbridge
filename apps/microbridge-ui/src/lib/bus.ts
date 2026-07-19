@@ -27,11 +27,12 @@ const DEMO: Snapshot = {
     },
   ],
   focused_session_id: "s1",
-  agent_key_session_ids: ["s1", "s2", "s3", null, null, null],
+  // focused_app default: only Codex threads while s1 owns the deck
+  agent_key_session_ids: ["s1", null, null, null, null, null],
   device_connected: false,
   device_name: "demo-browser",
   config: {
-    key_source: "most_recent",
+    key_source: "focused_app",
     pinned_session_ids: [],
     app_priority: [],
     custom_key_ids: ["", "", "", "", "", ""],

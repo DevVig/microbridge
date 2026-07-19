@@ -113,7 +113,7 @@ export const KeysTab = ({
                   Agent Keys follow your active threads automatically (key source: <span style={{
                 color: t.text,
                 fontWeight: 500
-              }}>Most recent</span>).
+              }}>Focused app</span>).
                   Press switches the thread; double-press brings its window forward.
                 </p>
                 <button type="button" onClick={onOpenAgentKeys} className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium transition-opacity hover:opacity-80" style={{

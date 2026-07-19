@@ -10,13 +10,13 @@ const KEY_SOURCES: {
   title: string;
   desc: string;
 }[] = [{
+  id: 'FOCUSED_APP',
+  title: 'Focused app',
+  desc: 'All six keys show the newest threads from whichever app owns the deck — Claude, Codex, Cursor, Synara, T3 Code, and so on. (default)'
+}, {
   id: 'MOST_RECENT',
   title: 'Most recent',
   desc: 'Each Agent Key follows the most recently updated thread, across all apps.'
-}, {
-  id: 'FOCUSED_APP',
-  title: 'Focused app',
-  desc: 'All six keys show threads from whichever app owns the deck — Codex\u2019s six, Cursor\u2019s five, and so on.'
 }, {
   id: 'PINNED',
   title: 'Pinned',
@@ -55,7 +55,7 @@ export const FocusTab = () => {
   const {
     t
   } = useTheme();
-  const [keySource, setKeySource] = useState<KeySource>('MOST_RECENT');
+  const [keySource, setKeySource] = useState<KeySource>('FOCUSED_APP');
   const [mode, setMode] = useState<FocusMode>('AUTO');
   const [appOrder, setAppOrder] = useState<string[]>(FOCUS_APPS_DEFAULT.map(a => a.id));
   const [approvalsInterrupt, setApprovalsInterrupt] = useState(true);
