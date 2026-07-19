@@ -1,6 +1,12 @@
+import { hasTauri, invokeQuiet, invokeTauri } from "./tauri";
 import type { DaemonConfig, Snapshot } from "./types";
 
-/** Talks to microbridged via Tauri when available; demo snapshot in browser only. */
+/**
+ * Talks to microbridged via Tauri when available; demo snapshot in browser only.
+ *
+ * "Browser only" is load-bearing: inside the app a daemon that isn't up yet must
+ * read as *not connected*, never as a populated deck. See `hasTauri` in ./tauri.
+ */
 
 const DEMO: Snapshot = {
   sessions: [
@@ -144,95 +150,110 @@ const DAEMON_OFFLINE: Snapshot = {
   })),
 };
 
-function runningInTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+/**
+ * Demo snapshot, optionally padded out to `?threads=N` sessions.
+ *
+ * Three sessions aren't enough to exercise the popover's scrolling thread list
+ * in a browser preview, and this is the only place that can produce sessions
+ * without a daemon. Reachable only outside Tauri, so it can't leak into the app.
+ */
+function demoSnapshot(): Snapshot {
+  const requested = Number(
+    new URLSearchParams(window.location.search).get("threads"),
+  );
+  if (!Number.isFinite(requested) || requested <= DEMO.sessions.length) {
+    return DEMO;
+  }
+  const sessions = Array.from({ length: Math.min(requested, 200) }, (_, i) => {
+    const base = DEMO.sessions[i % DEMO.sessions.length];
+    return i < DEMO.sessions.length
+      ? base
+      : { ...base, id: `${base.id}-${i}`, title: `${base.title} (${i + 1})` };
+  });
+  return { ...DEMO, sessions };
 }
 
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
+/**
+ * Current snapshot, or `null` when microbridged hasn't sent one yet.
+ *
+ * Outside Tauri this is the demo snapshot so the surfaces are previewable in a
+ * browser. Inside Tauri, `get_snapshot` rejects with "waiting for microbridged"
+ * until the first snapshot lands — that rejection must stay visible as `null`.
+ */
+export async function fetchSnapshot(): Promise<Snapshot | null> {
+  if (!hasTauri()) return demoSnapshot();
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<T>(cmd, args);
+    return await invokeTauri<Snapshot>("get_snapshot");
   } catch {
     return null;
   }
 }
-
-export async function fetchSnapshot(): Promise<Snapshot> {
-  const snap = await invoke<Snapshot>("get_snapshot");
-  if (snap) return snap;
-  if (runningInTauri()) throw new Error("waiting for microbridged");
-  return DEMO;
-}
-
 export function isDemoSnapshot(snapshot: Snapshot): boolean {
   return snapshot.device_name === "demo-browser";
 }
 
+/** Rejects if the daemon refuses the write, so the UI can revert rather than lie. */
 export async function setConfig(config: DaemonConfig): Promise<DaemonConfig> {
-  const next = await invoke<DaemonConfig>("set_config", { config });
-  return next ?? config;
+  const next = await invokeTauri<DaemonConfig>("set_config", { config });
+  return next ?? config; // no Tauri: browser preview, echo the optimistic value
 }
 
 export async function setAdapterEnabled(adapterId: string, enabled: boolean): Promise<string> {
-  const message = await invoke<string>("set_adapter_enabled", { adapterId, enabled });
+  const message = await invokeTauri<string>("set_adapter_enabled", { adapterId, enabled });
   if (message === null) throw new Error("Adapter controls require the Microbridge app.");
   return message;
 }
 
 export async function pairAdapter(adapterId: string, pairingUrl: string): Promise<string> {
-  const message = await invoke<string>("pair_adapter", { adapterId, pairingUrl });
+  const message = await invokeTauri<string>("pair_adapter", { adapterId, pairingUrl });
   if (message === null) throw new Error("Pairing requires the Microbridge app.");
   return message;
 }
 
 export async function forgetAdapter(adapterId: string): Promise<string> {
-  const message = await invoke<string>("forget_adapter", { adapterId });
+  const message = await invokeTauri<string>("forget_adapter", { adapterId });
   if (message === null) throw new Error("Adapter controls require the Microbridge app.");
   return message;
 }
 
 export async function activateAgentKey(index: number, open = false): Promise<string> {
-  const message = await invoke<string>("activate_agent_key", { index, open });
+  const message = await invokeTauri<string>("activate_agent_key", { index, open });
   if (message === null) throw new Error("Agent Key simulation requires the Microbridge app.");
   return message;
 }
 
-export async function fitPopover(contentHeight: number): Promise<void> {
-  await invoke("fit_popover", { contentHeight });
-}
-
 export async function openSettings(): Promise<void> {
-  await invoke("open_settings");
+  await invokeQuiet("open_settings");
 }
 
 export async function closeSettings(): Promise<void> {
-  await invoke("close_settings");
+  await invokeQuiet("close_settings");
 }
 
 export async function quitUi(): Promise<void> {
-  await invoke("quit_ui");
+  await invokeQuiet("quit_ui");
 }
 
 /** Subscribe to live bus snapshots. Returns an unsubscribe fn. */
 export async function subscribeSnapshot(
   onSnapshot: (snapshot: Snapshot) => void,
 ): Promise<() => void> {
-  if (!runningInTauri()) {
-    onSnapshot(DEMO);
-    const id = window.setInterval(() => onSnapshot(DEMO), 2000);
-    return () => window.clearInterval(id);
+  if (!hasTauri()) {
+    onSnapshot(demoSnapshot());
+    return () => {};
   }
   try {
     const { listen } = await import("@tauri-apps/api/event");
+    let receivedLiveSnapshot = false;
     const unlisten = await listen<Snapshot>("bus-snapshot", (event) => {
+      receivedLiveSnapshot = true;
       onSnapshot(event.payload);
     });
-    try {
-      onSnapshot(await fetchSnapshot());
-    } catch {
-      // Keep the listener: the native reconnect loop will publish a real
-      // snapshot as soon as the bundled or installed daemon is reachable.
-      onSnapshot(DAEMON_OFFLINE);
+    // Keep the listener when the daemon is offline; the native reconnect loop
+    // publishes a real snapshot as soon as it becomes reachable.
+    const initialSnapshot = await fetchSnapshot();
+    if (!receivedLiveSnapshot) {
+      onSnapshot(initialSnapshot ?? DAEMON_OFFLINE);
     }
     return unlisten;
   } catch {

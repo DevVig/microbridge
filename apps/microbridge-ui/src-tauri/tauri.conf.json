@@ -25,7 +25,7 @@
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "fullscreen": false,
-        "focus": false
+        "focus": true
       },
       {
         "label": "settings",
@@ -45,7 +45,7 @@
         "title": "Microbridge Focus",
         "url": "index.html?view=hud",
         "width": 360,
-        "height": 120,
+        "height": 152,
         "resizable": false,
         "decorations": false,
         "transparent": true,

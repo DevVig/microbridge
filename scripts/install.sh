@@ -7,7 +7,6 @@ BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 WITH_UI=1
 WITH_LAUNCHD=1
 LABEL="ai.microbridge.daemon"
-UI_LABEL="ai.microbridge.ui"
 
 usage() {
   cat <<EOF
@@ -143,34 +142,11 @@ if [[ "$WITH_UI" -eq 1 ]]; then
         mkdir -p "$HOME/Applications"
         cp -R "$APP_SRC" "$HOME/Applications/Microbridge.app"
         echo "    installed ~/Applications/Microbridge.app"
-        if [[ "$WITH_LAUNCHD" -eq 1 ]]; then
-          UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
-          cat >"$UI_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${UI_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${HOME}/Applications/Microbridge.app/Contents/MacOS/microbridge-ui</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <false/>
-</dict>
-</plist>
-EOF
-          launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
-          launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
-          launchctl enable "gui/$(id -u)/${UI_LABEL}"
-          launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
-          echo "    menu bar app set to launch at login"
-        else
-          open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
-        fi
+        # Launch at login is the app's job now, not the installer's — it asks
+        # on first launch and owns the ai.microbridge.ui LaunchAgent from there
+        # (Settings → General). Doing it here too would only have covered
+        # source installs, and would race the app for the same plist.
+        open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
       else
         echo "    note: .app bundle not found — web build is in apps/microbridge-ui/dist"
         echo "    run: cd apps/microbridge-ui && npm run tauri dev"

@@ -7,7 +7,6 @@ REPO="${MICROBRIDGE_REPO:-DevVig/microbridge}"
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 TAG="${1:-}"
 LABEL="ai.microbridge.daemon"
-UI_LABEL="ai.microbridge.ui"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -120,29 +119,10 @@ EOF
     cp -R "$APP_SRC" "$DEST"
     xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
     echo "owned-by-release" >"$MARKER"
-    UI_PLIST="$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
-    cat >"$UI_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${UI_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${HOME}/Applications/Microbridge.app/Contents/MacOS/microbridge-ui</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <false/>
-</dict>
-</plist>
-EOF
-    launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$UI_PLIST"
-    launchctl enable "gui/$(id -u)/${UI_LABEL}"
-    launchctl kickstart -k "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || open "$HOME/Applications/Microbridge.app"
+    # Launch at login is the app's job now, not the installer's — it asks on
+    # first launch and owns the ai.microbridge.ui LaunchAgent from there
+    # (Settings → General), so brew/DMG/source all behave the same.
+    open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
     echo "    installed ~/Applications/Microbridge.app"
   }
 

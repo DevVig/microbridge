@@ -16,8 +16,9 @@ use mb_protocol::{BusEvent, ClientMessage, DaemonConfig, ServerMessage, Snapshot
 use tauri::{
     menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
+use tauri_plugin_autostart::ManagerExt;
 use tokio::sync::Mutex;
 
 struct AppState {
@@ -57,7 +58,9 @@ fn start_bundled_daemon() -> Option<Child> {
         PathBuf::from("/opt/homebrew/bin/microbridged"),
         PathBuf::from("/usr/local/bin/microbridged"),
     ]);
-    let binary = candidates.into_iter().find(|candidate| candidate.is_file())?;
+    let binary = candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())?;
 
     let log_path = daemon_socket_path().with_file_name("microbridged-app.log");
     if let Some(directory) = log_path.parent() {
@@ -93,7 +96,11 @@ fn validate_cursor_plugin(path: &Path) -> Result<(), String> {
             path.display()
         ));
     }
-    for relative in ["hooks/hooks.json", "hooks/microbridge-event.mjs", "hooks/event.mjs"] {
+    for relative in [
+        "hooks/hooks.json",
+        "hooks/microbridge-event.mjs",
+        "hooks/event.mjs",
+    ] {
         if !path.join(relative).is_file() {
             return Err(format!("Cursor integration is missing {relative}"));
         }
@@ -129,8 +136,7 @@ fn cursor_plugin_source(app: &AppHandle) -> Result<PathBuf, String> {
     }
 
     // `tauri dev` reads the repository copy; release bundles use Resources.
-    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../adapters/cursor");
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../adapters/cursor");
     validate_cursor_plugin(&repository)?;
     Ok(repository)
 }
@@ -208,8 +214,7 @@ fn install_cursor_integration_at(
         return Err(format!("install Cursor integration: {error}"));
     }
     if backup.exists() {
-        fs::remove_dir_all(&backup)
-            .map_err(|e| format!("remove old Cursor integration: {e}"))?;
+        fs::remove_dir_all(&backup).map_err(|e| format!("remove old Cursor integration: {e}"))?;
     }
     Ok(())
 }
@@ -253,8 +258,7 @@ mod cursor_integration_tests {
             std::process::id()
         ));
         let destination = root.join("local/microbridge");
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../adapters/cursor");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../adapters/cursor");
 
         install_cursor_integration_at(&source, &destination, "0.2.1").unwrap();
         validate_cursor_plugin(&destination).unwrap();
@@ -285,8 +289,7 @@ mod cursor_integration_tests {
             std::process::id()
         ));
         let destination = root.join("local/microbridge");
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../adapters/cursor");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../adapters/cursor");
         copy_dir(&source, &destination).unwrap();
 
         assert!(install_cursor_integration_at(&source, &destination, "0.2.1").is_err());
@@ -321,11 +324,65 @@ fn physical_tray_rect(rect: &tauri::Rect, scale: f64) -> (f64, f64, f64, f64) {
     (x, y, w, h)
 }
 
-fn position_below_tray(window: &WebviewWindow, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
-    let Ok(size) = window.outer_size() else {
-        return;
+/// Popover geometry, in logical pixels.
+const POPOVER_WIDTH: f64 = 380.0;
+/// Below this the card has nothing useful to show, so never shrink past it.
+const POPOVER_MIN_HEIGHT: f64 = 160.0;
+/// Ceiling, not a target — the webview drives the real height via
+/// `resize_popover`, so the window is usually well under this. Sized to clear
+/// the tallest the card can legitimately be: ~438px of chrome (header, focused
+/// thread, the device echo at ~150px, the simulator note, footer) plus the
+/// 10-row thread viewport, plus the shadow slack the webview adds.
+const POPOVER_MAX_HEIGHT: f64 = 780.0;
+/// Gap between the menu bar icon and the top of the popover window.
+const POPOVER_TRAY_GAP: f64 = 6.0;
+/// Breathing room left between the popover and the bottom of the work area.
+const POPOVER_BOTTOM_MARGIN: f64 = 12.0;
+
+/// Scale factor for `window`, falling back to its monitor and finally to 1.0.
+///
+/// Assuming Retina would place the popover at half the intended offset on a 1x
+/// external display.
+fn window_scale(window: &WebviewWindow) -> f64 {
+    window
+        .scale_factor()
+        .ok()
+        .or_else(|| {
+            window
+                .current_monitor()
+                .ok()
+                .flatten()
+                .map(|m| m.scale_factor())
+        })
+        .unwrap_or(1.0)
+}
+
+/// Logical height available between `top_y` (physical, in screen coordinates)
+/// and the bottom of the monitor's work area — which on macOS already excludes
+/// the menu bar and the Dock, so the popover lands above the Dock rather than
+/// behind it. Falls back to the maximum when the monitor can't be read.
+fn available_popover_height(window: &WebviewWindow, top_y: i32) -> f64 {
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return POPOVER_MAX_HEIGHT;
     };
-    let width = f64::from(size.width);
+    let work = monitor.work_area();
+    let bottom = work.position.y + work.size.height as i32;
+    let room = f64::from(bottom - top_y) / window_scale(window) - POPOVER_BOTTOM_MARGIN;
+    room.clamp(POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT)
+}
+
+/// Room below the popover's current top edge, recomputed from where the window
+/// actually sits — so moving between monitors needs no shared state.
+fn popover_available_height(window: &WebviewWindow) -> f64 {
+    window
+        .outer_position()
+        .map(|pos| available_popover_height(window, pos.y))
+        .unwrap_or(POPOVER_MAX_HEIGHT)
+}
+
+fn position_below_tray(window: &WebviewWindow, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
+    let scale = window_scale(window);
+    let width = POPOVER_WIDTH * scale;
     let mut x = tray_x + tray_w / 2.0 - width / 2.0;
     if let Ok(Some(monitor)) = window.current_monitor() {
         let origin = monitor.position();
@@ -334,14 +391,39 @@ fn position_below_tray(window: &WebviewWindow, tray_x: f64, tray_y: f64, tray_w:
         let max_x = min_x + f64::from(screen.width) - width;
         x = x.clamp(min_x + 8.0, max_x - 8.0);
     }
-    let y = (tray_y + tray_h + 6.0).round() as i32;
+    let y = (tray_y + tray_h + POPOVER_TRAY_GAP * scale).round() as i32;
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(
         x.round() as i32,
         y,
     )));
+    // Size to the room actually left below the menu bar *before* showing, so
+    // the popover can't hang off the bottom of the screen even if the webview
+    // hasn't reported its content height yet.
+    let _ = window.set_size(LogicalSize::new(
+        POPOVER_WIDTH,
+        available_popover_height(window, y),
+    ));
 }
 
-fn toggle_popover(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
+/// When the popover last hid itself because it lost focus. Shared by the blur
+/// handler and the tray click handler; see `toggle_popover`.
+type BlurHideClock = Arc<std::sync::Mutex<Option<std::time::Instant>>>;
+
+/// A click on the tray icon steals focus from the popover on mouse *down*,
+/// which fires `Focused(false)` and hides it — before the tray's mouse *up*
+/// click event arrives. By then the window reads as hidden, so a naive toggle
+/// would reopen it and the popover could never be dismissed by clicking the
+/// icon. Treat a click landing right after a blur-hide as the dismiss it was.
+const BLUR_HIDE_DISMISS_WINDOW: Duration = Duration::from_millis(250);
+
+fn toggle_popover(
+    app: &AppHandle,
+    tray_x: f64,
+    tray_y: f64,
+    tray_w: f64,
+    tray_h: f64,
+    blur_hide: &BlurHideClock,
+) {
     let Some(window) = app.get_webview_window("popover") else {
         return;
     };
@@ -349,7 +431,18 @@ fn toggle_popover(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h
         let _ = window.hide();
         return;
     }
+    let just_blurred = blur_hide
+        .lock()
+        .ok()
+        .and_then(|t| *t)
+        .is_some_and(|t| t.elapsed() < BLUR_HIDE_DISMISS_WINDOW);
+    if just_blurred {
+        return;
+    }
     position_below_tray(&window, tray_x, tray_y, tray_w, tray_h);
+    // The cap depends on the monitor the popover just landed on, so hand the
+    // webview the new one before it paints.
+    let _ = window.emit("popover-fit", popover_available_height(&window));
     let _ = window.show();
     let _ = window.set_focus();
 }
@@ -509,7 +602,9 @@ async fn forget_adapter(
                     })
                     .await;
             }
-            return Err(format!("Adapter removal failed and the prior state was restored: {error}"));
+            return Err(format!(
+                "Adapter removal failed and the prior state was restored: {error}"
+            ));
         }
     };
     if adapter_id == "cursor" && removed {
@@ -530,33 +625,6 @@ async fn activate_agent_key(
         .bus
         .adapter_operation(ClientMessage::ActivateAgentKey { index, open })
         .await
-}
-
-/// Fit the popover to its measured card while leaving a safety margin at the
-/// bottom of the active display. The frontend gives only Threads the overflow.
-#[tauri::command]
-fn fit_popover(content_height: f64, app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("popover")
-        .ok_or_else(|| "popover window unavailable".to_string())?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let current_size = window.outer_size().map_err(|e| e.to_string())?;
-    let current_position = window.outer_position().map_err(|e| e.to_string())?;
-    let monitor = window
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "active monitor unavailable".to_string())?;
-    let monitor_bottom = i64::from(monitor.position().y) + i64::from(monitor.size().height);
-    let safety_margin = (24.0 * scale).round() as i64;
-    let available =
-        (monitor_bottom - i64::from(current_position.y) - safety_margin).max(180) as u32;
-    let desired = (content_height.max(180.0) * scale).round() as u32;
-    window
-        .set_size(Size::Physical(PhysicalSize::new(
-            current_size.width,
-            desired.min(available),
-        )))
-        .map_err(|e| e.to_string())
 }
 
 /// Show the settings window (and hide the popover). Shared by the `open_settings`
@@ -596,6 +664,30 @@ async fn hide_popover(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn quit_ui(app: AppHandle) {
     app.exit(0);
+}
+
+/// Height cap, in logical pixels, that the popover webview applies to its card.
+#[tauri::command]
+fn popover_max_height(app: AppHandle) -> f64 {
+    app.get_webview_window("popover")
+        .map(|window| popover_available_height(&window))
+        .unwrap_or(POPOVER_MAX_HEIGHT)
+}
+
+/// Resize the popover to hug its content.
+///
+/// The webview measures its card and calls this, so the window is never taller
+/// than what it draws — a transparent window is still hit-testable, and the
+/// unused remainder of a fixed frame swallows clicks meant for the app
+/// underneath. The clamp keeps the window inside the room below the menu bar,
+/// so content can't push the footer off the bottom of the screen either.
+#[tauri::command]
+fn resize_popover(app: AppHandle, height: f64) {
+    let Some(window) = app.get_webview_window("popover") else {
+        return;
+    };
+    let clamped = height.clamp(POPOVER_MIN_HEIGHT, popover_available_height(&window));
+    let _ = window.set_size(LogicalSize::new(POPOVER_WIDTH, clamped));
 }
 
 /// Install channel of the running app. Homebrew drops a `.microbridge-brew`
@@ -639,6 +731,71 @@ fn trigger_update_check(app: &AppHandle) {
     let _ = app.emit("menu://check-updates", ());
 }
 
+/// launchd label for the login item. Deliberately the same label `install.sh`
+/// used to write by hand, so the autostart plugin owns that exact file
+/// (`~/Library/LaunchAgents/ai.microbridge.ui.plist`) instead of creating a
+/// second one. Without this the plugin would default to `package_info().name`
+/// ("Microbridge") and a source install would end up with two login entries.
+const LOGIN_ITEM_LABEL: &str = "ai.microbridge.ui";
+
+/// True when the executable sits inside a `.app` bundle.
+///
+/// `tauri dev` runs the bare binary out of `target/debug`, and the login item
+/// records whatever `current_exe()` returns — so accepting the prompt during
+/// development would register a throwaway build to launch at every login, and
+/// leave a dangling login item behind the moment `target/` is cleaned.
+fn running_from_app_bundle() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.ancestors()
+                .nth(3)
+                .map(|bundle| bundle.extension().is_some_and(|ext| ext == "app"))
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a login item can meaningfully be registered for this build.
+#[tauri::command]
+fn can_launch_at_login() -> bool {
+    running_from_app_bundle()
+}
+
+#[tauri::command]
+fn launch_at_login_enabled(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_launch_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    if enabled {
+        // Writes the plist with RunAtLoad; launchd picks it up at next login.
+        // Deliberately not bootstrapped here — that would fire RunAtLoad
+        // immediately and start a second copy of the app.
+        manager.enable().map_err(|e| e.to_string())?;
+    } else {
+        manager.disable().map_err(|e| e.to_string())?;
+        bootout_login_item();
+    }
+    Ok(())
+}
+
+/// `disable()` only deletes the plist. Installs that came from `install.sh` also
+/// had the agent *bootstrapped* into the running launchd session, so without
+/// this it would linger in `launchctl print` until the next logout. Best-effort:
+/// a missing agent is the normal case and its error is not interesting.
+#[cfg(target_os = "macos")]
+fn bootout_login_item() {
+    let _ = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!("launchctl bootout gui/$(id -u)/{LOGIN_ITEM_LABEL}"))
+        .status();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn bootout_login_item() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -646,6 +803,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name(LOGIN_ITEM_LABEL)
+                .build(),
+        )
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -699,11 +861,7 @@ pub fn run() {
                                     .get("cursor")
                                     .map(|preference| preference.enabled)
                                     .unwrap_or(false);
-                                sync_cursor_integration(
-                                    &handle,
-                                    &cursor_sync_loop,
-                                    cursor_enabled,
-                                );
+                                sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
                             }
                             let focus_changed = matches!(&event, BusEvent::FocusChanged { .. });
                             let mut guard = snap_for_loop.lock().await;
@@ -778,6 +936,9 @@ pub fn run() {
             )?;
             let context_menu = tray_menu.clone();
 
+            let blur_hide: BlurHideClock = Arc::new(std::sync::Mutex::new(None));
+            let blur_hide_tray = Arc::clone(&blur_hide);
+
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .icon_as_template(true)
@@ -792,41 +953,39 @@ pub fn run() {
                     "quit" => app.exit(0),
                     _ => {}
                 })
-                .on_tray_icon_event(move |tray, event| {
-                    match event {
-                        TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            rect,
-                            ..
-                        } => {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
-                            let previous = last_left_click_ms.swap(now, Ordering::Relaxed);
-                            if now.saturating_sub(previous) < 180 {
-                                return;
-                            }
-                            let app = tray.app_handle();
-                            let scale = app
-                                .get_webview_window("popover")
-                                .and_then(|w| w.scale_factor().ok())
-                                .unwrap_or(2.0);
-                            let (x, y, w, h) = physical_tray_rect(&rect, scale);
-                            toggle_popover(app, x, y, w, h);
+                .on_tray_icon_event(move |tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        rect,
+                        ..
+                    } => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let previous = last_left_click_ms.swap(now, Ordering::Relaxed);
+                        if now.saturating_sub(previous) < 180 {
+                            return;
                         }
-                        TrayIconEvent::Click {
-                            button: MouseButton::Right,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } => {
-                            if let Some(window) = tray.app_handle().get_webview_window("popover") {
-                                let _ = context_menu.popup(window.as_ref().window());
-                            }
-                        }
-                        _ => {}
+                        let app = tray.app_handle();
+                        let scale = app
+                            .get_webview_window("popover")
+                            .map(|w| window_scale(&w))
+                            .unwrap_or(1.0);
+                        let (x, y, w, h) = physical_tray_rect(&rect, scale);
+                        toggle_popover(app, x, y, w, h, &blur_hide_tray);
                     }
+                    TrayIconEvent::Click {
+                        button: MouseButton::Right,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } => {
+                        if let Some(window) = tray.app_handle().get_webview_window("popover") {
+                            let _ = context_menu.popup(window.as_ref().window());
+                        }
+                    }
+                    _ => {}
                 })
                 .build(app)?;
 
@@ -834,6 +993,9 @@ pub fn run() {
                 let popover_hide = popover.clone();
                 popover.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {
+                        if let Ok(mut last) = blur_hide.lock() {
+                            *last = Some(std::time::Instant::now());
+                        }
                         let _ = popover_hide.hide();
                     }
                 });
@@ -858,13 +1020,17 @@ pub fn run() {
             pair_adapter,
             forget_adapter,
             activate_agent_key,
-            fit_popover,
             open_settings,
             close_settings,
             hide_popover,
             quit_ui,
             update_channel,
-            app_version
+            app_version,
+            launch_at_login_enabled,
+            set_launch_at_login,
+            can_launch_at_login,
+            popover_max_height,
+            resize_popover
         ])
         .build(tauri::generate_context!())
         .expect("error while building microbridge-ui")

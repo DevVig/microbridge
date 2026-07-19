@@ -101,7 +101,8 @@ class Microbridge < Formula
         Status:  microbridgectl status
         Config:  ~/.microbridge/
 
-      Start the service once to install the marker-owned app, then open it:
+      Start the service once to install the marker-owned app, then open it. The
+      app will offer to start itself at login (change it in Settings > General):
         brew services start microbridge
         open ~/Applications/Microbridge.app
 

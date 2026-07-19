@@ -21,6 +21,11 @@ import {
   type ControlId,
 } from "../components/DeviceTwin";
 import { forgetAdapter, pairAdapter, setAdapterEnabled } from "../lib/bus";
+import {
+  canLaunchAtLogin,
+  launchAtLoginEnabled,
+  setLaunchAtLogin,
+} from "../lib/autostart";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -73,7 +78,7 @@ const KEY_SOURCES: {
   },
 ];
 
-type Tab = "keys" | "agent" | "adapters" | "device" | "updates";
+type Tab = "general" | "keys" | "agent" | "adapters" | "device" | "updates";
 
 export function Settings({
   snapshot,
@@ -105,10 +110,17 @@ export function Settings({
   const [pairingUrl, setPairingUrl] = useState("");
   const [adapterMessage, setAdapterMessage] = useState<string | null>(null);
   const [adapterBusy, setAdapterBusy] = useState<Set<string>>(() => new Set());
+  // null until the login item has been read, and permanently null where a login
+  // item is meaningless: outside Tauri, or in a dev build whose executable path
+  // points into `target/debug`.
+  const [atLogin, setAtLogin] = useState<boolean | null>(null);
 
   useEffect(() => {
     void appVersion().then(setVersion);
     void updateChannel().then(setChannel);
+    void canLaunchAtLogin().then(async (supported) => {
+      if (supported) setAtLogin(await launchAtLoginEnabled());
+    });
   }, []);
 
   const runAdapterOperation = async (adapterId: string, work: () => Promise<string>) => {
@@ -127,7 +139,20 @@ export function Settings({
     }
   };
 
+  // Write first, then adopt what the system actually reports — a failed write
+  // must not leave the checkbox claiming something that isn't true.
+  const toggleAtLogin = async (next: boolean) => {
+    setAtLogin(next);
+    try {
+      await setLaunchAtLogin(next);
+    } catch {
+      /* fall through to the re-read below */
+    }
+    setAtLogin(await launchAtLoginEnabled());
+  };
+
   const tabs: { id: Tab; label: string }[] = [
+    { id: "general", label: "General" },
     { id: "keys", label: "Keys" },
     { id: "agent", label: "Agent Keys" },
     { id: "adapters", label: "Adapters" },
@@ -177,6 +202,45 @@ export function Settings({
       </aside>
 
       <main className="flex-1 overflow-auto p-6">
+        {tab === "general" && (
+          <section>
+            <h1 className="text-[18px] font-semibold">General</h1>
+            <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
+              Microbridge lives in the menu bar — it has to be running to drive
+              your deck.
+            </p>
+
+            <label
+              className="mt-5 flex max-w-md cursor-pointer items-start gap-2.5 rounded-2xl p-4"
+              style={{
+                backgroundColor: t.panel,
+                border: `1px solid ${t.hairline}`,
+              }}
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={atLogin === true}
+                disabled={atLogin === null}
+                onChange={(e) => void toggleAtLogin(e.target.checked)}
+              />
+              <span>
+                <span className="block text-[12.5px] font-medium">
+                  Launch Microbridge at login
+                </span>
+                <span
+                  className="mt-0.5 block text-[11px] leading-relaxed"
+                  style={{ color: t.textSecondary }}
+                >
+                  {atLogin === null
+                    ? "Only available in the installed app."
+                    : "Adds a login item so the menu bar icon comes back after a restart. Takes effect at your next login."}
+                </span>
+              </span>
+            </label>
+          </section>
+        )}
+
         {tab === "keys" && (
           <section className="flex flex-col gap-6 lg:flex-row">
             <div className="min-w-0 flex-1">
@@ -725,15 +789,15 @@ export function Settings({
                   setAutoCheckEnabled(e.target.checked);
                 }}
               />
-              Check for updates automatically when Microbridge starts
+              Check for updates automatically (at most once a day)
             </label>
             <p
               className="mt-2 max-w-md text-[11px]"
               style={{ color: t.textMuted }}
             >
-              Off by default. When on, Microbridge quietly checks once at launch
-              and only speaks up if an update is ready. No background polling,
-              ever.
+              Off by default. When on, Microbridge quietly checks at launch only
+              if 24 hours have passed, and speaks up only when an update is ready.
+              No background polling, ever.
             </p>
           </section>
         )}
