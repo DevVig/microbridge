@@ -127,6 +127,28 @@ describe("Popover", () => {
     expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
   });
 
+  it("caps a runaway thread list while reporting the full total", () => {
+    const sessions = Array.from({ length: 60 }, (_, index): SessionStatus => ({
+      id: `thread-${index}`,
+      app: "Codex",
+      title: `Safety row ${index}`,
+      state: "idle",
+      updated_at_ms: 60_000 - index,
+    }));
+    const html = renderToStaticMarkup(
+      <Popover
+        snapshot={snapshot(sessions)}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(html).toContain("Safety row 49");
+    expect(html).not.toContain("Safety row 50");
+    expect(html).toContain("50/60");
+  });
+
   it("renders the daemon LED frame and clickable Agent Key assignment", () => {
     const live = snapshot([
       {
