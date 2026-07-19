@@ -189,7 +189,9 @@ fn claude_app_label(entrypoint: Option<&str>, cwd: Option<&str>) -> String {
 fn host_from_cwd(cwd: Option<&str>) -> Option<&'static str> {
     let cwd = cwd?;
     let home = std::env::var("HOME").ok()?;
-    // (home-relative dir, display name) — extend as more SDK hosts appear.
+    // (home-relative dir, display name) — Synara / T3 Code / Cursor all share
+    // the Claude journal store; cwd under the host home names the IDE so
+    // focused_app can scope Agent Keys the same way for each.
     const HOSTS: &[(&str, &str)] = &[
         (".synara", "Synara"),
         (".t3", "T3 Code"),
@@ -312,6 +314,13 @@ mod tests {
         assert_eq!(
             claude_app_label(Some("sdk-cli"), Some(&format!("{home}/.t3/worktrees/Bar"))),
             "T3 Code"
+        );
+        assert_eq!(
+            claude_app_label(
+                Some("sdk-ts"),
+                Some(&format!("{home}/.cursor/worktrees/Baz"))
+            ),
+            "Cursor"
         );
 
         // Missing entrypoint stays back-compatible.

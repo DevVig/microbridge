@@ -2,6 +2,8 @@
 
 use mb_protocol::{AgentState, DaemonConfig, KeySource, SessionStatus, AGENT_KEY_COUNT};
 
+use crate::app_match::same_app;
+
 /// Fill six Agent Key slots from the session bus + config.
 pub fn resolve_agent_keys(
     sessions: &[SessionStatus],
@@ -42,7 +44,7 @@ fn focused_app(
         return most_recent(sessions);
     };
 
-    let mut sorted: Vec<_> = sessions.iter().filter(|s| s.app == app).collect();
+    let mut sorted: Vec<_> = sessions.iter().filter(|s| same_app(&s.app, app)).collect();
     sorted.sort_by_key(|b| std::cmp::Reverse(b.updated_at_ms));
     pad(sorted.into_iter().map(|s| Some(s.id.clone())).collect())
 }
@@ -130,7 +132,10 @@ mod tests {
             session("b", "Cursor", AgentState::Working, 3),
             session("c", "Claude Code", AgentState::Thinking, 2),
         ];
-        let config = DaemonConfig::default();
+        let config = DaemonConfig {
+            key_source: KeySource::MostRecent,
+            ..Default::default()
+        };
         let keys = resolve_agent_keys(&sessions, Some("a"), &config);
         assert_eq!(keys[0].as_deref(), Some("b"));
         assert_eq!(keys[1].as_deref(), Some("c"));
@@ -141,17 +146,55 @@ mod tests {
     #[test]
     fn focused_app_filters_to_owning_app() {
         let sessions = vec![
-            session("c1", "Codex", AgentState::Working, 5),
-            session("c2", "Codex", AgentState::Idle, 4),
+            session("c1", "Codex CLI", AgentState::Working, 5),
+            session("c2", "Codex CLI", AgentState::Idle, 4),
             session("x1", "Cursor", AgentState::Working, 9),
         ];
-        let config = DaemonConfig {
-            key_source: KeySource::FocusedApp,
-            ..Default::default()
-        };
+        // Default key source is focused_app: IDE-scoped, newest first.
+        let config = DaemonConfig::default();
         let keys = resolve_agent_keys(&sessions, Some("c1"), &config);
         assert_eq!(keys[0].as_deref(), Some("c1"));
         assert_eq!(keys[1].as_deref(), Some("c2"));
+        assert!(keys[2].is_none());
+    }
+
+    #[test]
+    fn focused_app_matches_t3_nightly_and_cursor() {
+        let sessions = vec![
+            session("t1", "T3 Code", AgentState::Working, 5),
+            session("t2", "T3 Code", AgentState::Idle, 4),
+            session("c1", "Cursor", AgentState::Working, 9),
+            session("s1", "Synara", AgentState::Thinking, 8),
+        ];
+        let config = DaemonConfig {
+            frontmost_app: Some("T3 Code (Nightly)".into()),
+            ..Default::default()
+        };
+        // No focused session → frontmost Nightly still scopes to T3 Code threads.
+        let keys = resolve_agent_keys(&sessions, None, &config);
+        assert_eq!(keys[0].as_deref(), Some("t1"));
+        assert_eq!(keys[1].as_deref(), Some("t2"));
+        assert!(keys[2].is_none());
+
+        let cursor_focus = resolve_agent_keys(&sessions, Some("c1"), &config);
+        assert_eq!(cursor_focus[0].as_deref(), Some("c1"));
+        assert!(cursor_focus[1].is_none());
+    }
+
+    #[test]
+    fn focused_app_matches_claude_frontmost() {
+        let sessions = vec![
+            session("cl1", "Claude Code", AgentState::Working, 6),
+            session("cl2", "Claude Code", AgentState::Idle, 3),
+            session("x1", "Cursor", AgentState::Working, 9),
+        ];
+        let config = DaemonConfig {
+            frontmost_app: Some("Claude".into()),
+            ..Default::default()
+        };
+        let keys = resolve_agent_keys(&sessions, None, &config);
+        assert_eq!(keys[0].as_deref(), Some("cl1"));
+        assert_eq!(keys[1].as_deref(), Some("cl2"));
         assert!(keys[2].is_none());
     }
 

@@ -85,11 +85,11 @@ remapped keys.
 Agent Key press semantics (parity with ChatGPT desktop): single press
 switches the followed thread in the background; double press (≤350ms) also
 brings its window forward. Which threads the six Agent Keys follow is the
-**key source**: most recent (cross-app, default) / focused app (the deck
-re-populates with the owning app's threads) / pinned / priority / custom
-assignment. Agent Keys mix apps by default — the deck is a cross-app
-monitoring surface — while command keys always route to the single
-daemon-resolved focused thread.
+**key source**: focused app (default — the deck re-populates with the
+owning IDE's newest threads) / most recent (cross-app) / pinned / priority /
+custom assignment. Agent Keys follow one IDE at a time by default; switch
+to most recent for a cross-app monitoring surface. Command keys always
+route to the single daemon-resolved focused thread.
 
 The on-screen **device twin** is a photo-accurate vector rendering of the
 actual hardware — white plate (white in both themes), frosted agent caps with
