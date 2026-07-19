@@ -39,7 +39,7 @@ export function Hud({
         style={{
           backgroundColor: t.panel,
           border: `1px solid ${t.panelBorder}`,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+          boxShadow: t.floatingShadow,
         }}
       >
         <div className="flex items-center gap-3 px-5 pb-4 pt-5">
