@@ -244,12 +244,17 @@ export async function subscribeSnapshot(
   }
   try {
     const { listen } = await import("@tauri-apps/api/event");
+    let receivedLiveSnapshot = false;
     const unlisten = await listen<Snapshot>("bus-snapshot", (event) => {
+      receivedLiveSnapshot = true;
       onSnapshot(event.payload);
     });
     // Keep the listener when the daemon is offline; the native reconnect loop
     // publishes a real snapshot as soon as it becomes reachable.
-    onSnapshot((await fetchSnapshot()) ?? DAEMON_OFFLINE);
+    const initialSnapshot = await fetchSnapshot();
+    if (!receivedLiveSnapshot) {
+      onSnapshot(initialSnapshot ?? DAEMON_OFFLINE);
+    }
     return unlisten;
   } catch {
     // Never substitute canned threads in the production app.
