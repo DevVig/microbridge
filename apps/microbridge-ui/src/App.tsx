@@ -63,8 +63,10 @@ export default function App() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
-    void runAutomaticUpdateCheck();
-    void promptLaunchAtLoginOnce();
+    void (async () => {
+      await promptLaunchAtLoginOnce();
+      await runAutomaticUpdateCheck();
+    })();
 
     void (async () => {
       try {
