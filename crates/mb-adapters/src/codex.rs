@@ -205,7 +205,7 @@ fn codex_app_label(originator: Option<&str>, cwd: Option<&str>) -> String {
     host_from_cwd(cwd).unwrap_or("Codex CLI").into()
 }
 
-/// Rollouts a session spawned as subagents of its own.
+/// Detects rollouts spawned as subagents of another session.
 ///
 /// Codex writes these into the same dated directory as ordinary sessions and
 /// marks them only inside `session_meta.source`, so the `subagents` path filter
