@@ -10,14 +10,17 @@ VERSION="${2:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 EXPECTED_ARCH="${3:?usage: $0 path/to/microbridge.rb VERSION ARCH}"
 TAP="devvig/microbridge-ci"
 APP="$HOME/Applications/Microbridge.app"
+MARKER="$HOME/Applications/.Microbridge.app.microbridge-brew"
+LEGACY_MARKER="$APP/.microbridge-brew"
 BREW_LOG="$(brew --prefix)/var/log/microbridge.log"
 APP_LOG="${RUNNER_TEMP:-/tmp}/microbridge-app.log"
 
 cleanup() {
   brew services stop "$TAP/microbridge" >/dev/null 2>&1 || true
   HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge" >/dev/null 2>&1 || true
-  if [[ -f "$APP/.microbridge-brew" ]]; then
+  if [[ -f "$MARKER" || -f "$LEGACY_MARKER" ]]; then
     rm -rf "$APP"
+    rm -f "$MARKER"
   fi
   brew untap "$TAP" >/dev/null 2>&1 || true
 }
@@ -66,12 +69,17 @@ test -x "$PREFIX/bin/microbridgectl"
 
 brew services start "$TAP/microbridge"
 for _ in {1..30}; do
-  [[ -f "$APP/.microbridge-brew" ]] && break
+  [[ -f "$MARKER" ]] && break
   sleep 1
 done
 test -d "$APP"
-test -f "$APP/.microbridge-brew"
+test -f "$MARKER"
+test ! -e "$LEGACY_MARKER"
 test "$(/usr/libexec/PlistBuddy -c 'Print:CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
+codesign --verify --deep --strict --verbose=4 "$APP"
+spctl --assess --type execute --verbose=4 "$APP"
+xcrun stapler validate "$APP"
+syspolicy_check distribution "$APP"
 
 SERVICE_STATE=""
 for _ in {1..30}; do
@@ -98,8 +106,10 @@ fi
 
 # The app is deliberately outside the Cellar so the menu-bar UI survives
 # formula upgrades. Remove it only after verifying this install's marker.
-test -f "$APP/.microbridge-brew"
+test -f "$MARKER"
 rm -rf "$APP"
+rm -f "$MARKER"
 test ! -e "$APP"
+test ! -e "$MARKER"
 brew untap "$TAP"
 trap - EXIT

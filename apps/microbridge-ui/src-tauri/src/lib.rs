@@ -690,11 +690,12 @@ fn resize_popover(app: AppHandle, height: f64) {
     let _ = window.set_size(LogicalSize::new(POPOVER_WIDTH, clamped));
 }
 
-/// Install channel of the running app. Homebrew drops a `.microbridge-brew`
-/// marker at the bundle root (installed by the formula's service wrapper); its absence
-/// means a DMG/manual install. The in-app self-updater only replaces `direct`
-/// installs — brew copies are routed to `brew upgrade` so the formula version
-/// and the on-disk bundle never drift apart.
+/// Install channel of the running app. Homebrew drops an ownership marker next
+/// to the bundle (installed by the formula's service wrapper); its absence means
+/// a DMG/manual install. The marker must stay outside `Microbridge.app`, because
+/// adding a file to the bundle after signing invalidates its sealed signature.
+/// The in-app self-updater only replaces `direct` installs — brew copies are
+/// routed to `brew upgrade` so the formula version and bundle never drift apart.
 #[tauri::command]
 fn update_channel() -> String {
     if brew_marker_present() {
@@ -704,15 +705,22 @@ fn update_channel() -> String {
     }
 }
 
-/// True when the running bundle carries Homebrew's ownership marker.
+/// True when the running bundle has Homebrew's ownership marker beside it.
 /// `…/Microbridge.app/Contents/MacOS/microbridge-ui` → the bundle root is the
-/// third ancestor of the executable.
+/// third ancestor of the executable. The in-bundle check is migration support
+/// for installs made before the sidecar marker was introduced.
 fn brew_marker_present() -> bool {
     let Ok(exe) = std::env::current_exe() else {
         return false;
     };
     match exe.ancestors().nth(3) {
-        Some(bundle) => bundle.join(".microbridge-brew").exists(),
+        Some(bundle) => {
+            let sidecar = bundle
+                .parent()
+                .map(|parent| parent.join(".Microbridge.app.microbridge-brew"));
+            sidecar.is_some_and(|marker| marker.exists())
+                || bundle.join(".microbridge-brew").exists()
+        }
         None => false,
     }
 }
