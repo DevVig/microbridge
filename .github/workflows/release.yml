@@ -187,9 +187,27 @@ jobs:
           if [[ -n "${DMG:-}" ]]; then
             DMG_OUT="ui-out/microbridge-ui-${GITHUB_REF_NAME}-${{ matrix.target }}.dmg"
             cp "$DMG" "$DMG_OUT"
-            echo "Packed signed DMG: $DMG_OUT"
-            spctl --assess --type open --context context:primary-signature "$DMG_OUT" || true
-            codesign -dv --verbose=2 "$APP" || true
+            echo "Notarizing DMG: $DMG_OUT"
+
+            # Tauri notarizes and staples the app before it creates the disk
+            # image. The outer DMG needs its own notarization ticket; without
+            # it Gatekeeper can reject the download even when the app inside
+            # is valid. Keep every check fail-closed so a rejected artifact can
+            # never reach the GitHub Release.
+            codesign --verify --deep --strict --verbose=4 "$APP"
+            spctl --assess --type execute --verbose=4 "$APP"
+            xcrun stapler validate "$APP"
+
+            xcrun notarytool submit "$DMG_OUT" \
+              --key "$APPLE_API_KEY_PATH" \
+              --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" \
+              --wait
+            xcrun stapler staple "$DMG_OUT"
+            xcrun stapler validate "$DMG_OUT"
+            spctl --assess --type open --context context:primary-signature \
+              --verbose=4 "$DMG_OUT"
+            echo "Packed signed, notarized, and stapled DMG: $DMG_OUT"
           else
             echo "No DMG produced (unsigned build or bundle skipped)"
           fi
