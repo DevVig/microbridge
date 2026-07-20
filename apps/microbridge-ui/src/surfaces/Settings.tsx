@@ -26,6 +26,8 @@ import {
   launchAtLoginEnabled,
   setLaunchAtLogin,
 } from "../lib/autostart";
+import { IntegrationCard } from "../components/IntegrationCard";
+import { TRAFFIC_COLORS, integrationView } from "../lib/hosts";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -59,16 +61,6 @@ const INTEGRATION_ORDER = [
   "factory",
   "opencode",
 ];
-
-const INTEGRATION_STATE_LABELS = {
-  disabled: "Not connected",
-  needs_setup: "Waiting",
-  connecting: "Connecting",
-  connected: "Connected",
-  limited: "Limited",
-  incompatible: "Incompatible",
-  error: "Error",
-} as const;
 
 const KEY_SOURCES: {
   id: DaemonConfig["key_source"];
@@ -600,81 +592,68 @@ export function Settings({
           </section>
         )}
 
-        {tab === "integrations" && (
+        {tab === "integrations" && (() => {
+          const views = [...snapshot.adapters]
+            .sort(
+              (left, right) =>
+                INTEGRATION_ORDER.indexOf(left.id) -
+                INTEGRATION_ORDER.indexOf(right.id),
+            )
+            .map((adapter) => ({
+              adapter,
+              view: integrationView(adapter, snapshot.sessions),
+            }));
+          const groups = [
+            {
+              label: "Connected",
+              light: "green" as const,
+              items: views.filter((item) => item.view.connectedGroup),
+            },
+            {
+              label: "Not connected",
+              light: "yellow" as const,
+              items: views.filter((item) => !item.view.connectedGroup),
+            },
+          ];
+          return (
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Every supported app is listed here. Green integrations are ready;
-              everything else shows exactly what it needs. ChatGPT, Claude
-              Desktop, Synara, Conductor, and CNVS are built in. Cursor, Factory,
-              T3 Code, and OpenCode connect only after you choose to enable them.
+              Every supported app is its own card. Green means live threads or a
+              healthy watcher; yellow means waiting or setup; red means error.
+              ChatGPT, Claude Desktop, Synara, Conductor, and CNVS are built in.
+              Cursor, Factory, T3 Code, and OpenCode connect after you enable them.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              CNVS-hosted Codex and Claude terminals replace matching raw journal
-              cards while CNVS owns them. OpenCode uses its official global plugin
-              API for lifecycle and interrupt. T3-hosted threads are identified automatically. For controls, enable
-              Network access in T3 Code Settings → Connections, create a link under
-              Authorized clients, then paste it below. Factory hooks are merged
-              without replacing your existing hooks.
+              Synara and the desktop apps share Claude/Codex journals — they do
+              not need a separate adapter. CNVS-hosted terminals replace matching
+              raw journal cards while CNVS owns them. OpenCode uses its official
+              global plugin API. For T3 controls, enable Network access in T3 Code
+              Settings → Connections, create a link under Authorized clients, then
+              paste it below. Factory hooks are merged without replacing yours.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
                 {adapterMessage}
               </p>
             )}
-            {[
-              {
-                label: "Connected",
-                connected: true,
-                integrations: snapshot.adapters.filter((item) => item.state === "connected"),
-              },
-              {
-                label: "Not connected",
-                connected: false,
-                integrations: snapshot.adapters.filter((item) => item.state !== "connected"),
-              },
-            ].map((group) => (
+            {groups.map((group) => (
               <div className="mt-5" key={group.label}>
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: t.textSecondary }}>
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.connected ? "#30C463" : t.textMuted }} />
-                  {group.label} · {group.integrations.length}
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.items.length ? TRAFFIC_COLORS[group.light].dot : t.textMuted }} />
+                  {group.label} · {group.items.length}
                 </div>
                 <ul className="mt-2 space-y-3">
-              {[...group.integrations]
-                .sort((left, right) => INTEGRATION_ORDER.indexOf(left.id) - INTEGRATION_ORDER.indexOf(right.id))
-                .map((adapter) => (
-                <li
+              {group.items.map(({ adapter, view }) => (
+                <IntegrationCard
                   key={adapter.id}
-                  className="rounded-xl px-3 py-3"
-                  style={{
-                    backgroundColor: t.panel,
-                    border: `1px solid ${t.hairline}`,
-                  }}
+                  name={adapter.display_name}
+                  badge={adapter.kind}
+                  diagnostic={view.diagnostic}
+                  light={view.light}
+                  label={view.label}
+                  theme={t}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2 text-[12.5px] font-medium">
-                        {adapter.display_name}
-                      </div>
-                    <div
-                      className="mt-1 text-[11px]"
-                      style={{ color: t.textSecondary }}
-                    >
-                        {adapter.diagnostic}
-                      </div>
-                    </div>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[10px] font-medium capitalize"
-                      style={{
-                        backgroundColor:
-                          adapter.state === "connected" ? "#30C4631F" : adapter.state === "error" ? "#FF453A1F" : t.hoverBg,
-                        color:
-                          adapter.state === "connected" ? "#30A653" : adapter.state === "error" ? "#D93A32" : t.textSecondary,
-                      }}
-                    >
-                      {INTEGRATION_STATE_LABELS[adapter.state]}
-                    </span>
-                  </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {CAPABILITIES.map((capability) => (
                       <span
@@ -776,13 +755,14 @@ export function Settings({
                       </>
                     )}
                   </div>
-                </li>
+                </IntegrationCard>
               ))}
                 </ul>
               </div>
             ))}
           </section>
-        )}
+          );
+        })()}
 
         {tab === "updates" && (
           <section>

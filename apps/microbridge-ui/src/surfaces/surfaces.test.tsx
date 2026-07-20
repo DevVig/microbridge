@@ -46,6 +46,22 @@ function snapshot(sessions: SessionStatus[] = []): Snapshot {
     },
     adapters: [
       {
+        id: "synara",
+        display_name: "Synara",
+        kind: "native",
+        state: "connected",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: false,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
+        diagnostic: "Built-in lifecycle watcher is active.",
+      },
+      {
         id: "cnvs",
         display_name: "CNVS",
         kind: "native",
@@ -117,16 +133,45 @@ describe("Settings", () => {
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
     expect(html).toContain("Integrations");
+    // Synara waits (yellow) with no sessions; CNVS stays connected.
     expect(html).toContain("Connected · 1");
-    expect(html).toContain("Not connected · 1");
+    expect(html).toContain("Not connected · 2");
+    expect(html).toContain("Waiting");
+    expect(html).toContain("Synara");
+    expect(html).toContain("no separate adapter needed");
     expect(html).toContain("Connected across 3 exact canvas terminal targets");
     expect(html).toContain("✓ Open");
     expect(html).toContain("Interrupt");
-    expect(html).toContain("OpenCode uses its official global plugin");
+    expect(html).toContain("OpenCode uses its official");
     expect(html).toContain("Repair bundled integration");
+    expect(html).toContain("Green means live");
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");
     expect(html).not.toContain("not production");
+  });
+
+  it("shows Synara as Active when sessions are attributed", () => {
+    const html = renderToStaticMarkup(
+      <Settings
+        snapshot={snapshot([
+          {
+            id: "codex:synara-1",
+            app: "Synara",
+            title: "Ship integrations",
+            state: "working",
+            updated_at_ms: 1,
+          },
+        ])}
+        dark
+        tab="integrations"
+        onTab={noop}
+        onConfig={noop}
+        onClose={noop}
+      />,
+    );
+    expect(html).toContain("Active · 1 thread");
+    expect(html).toContain("Connected · 2");
+    expect(html).toContain("Not connected · 1");
   });
 });
 
