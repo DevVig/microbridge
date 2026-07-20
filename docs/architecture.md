@@ -5,7 +5,7 @@
 | Component | Runs as | Language | Required? |
 |---|---|---|---|
 | `microbridged` | resident daemon (launchd agent) | Rust | yes |
-| First-party adapters (Codex CLI, Claude Code) | in-process modules of the daemon | Rust | bundled |
+| First-party watchers (Codex CLI, Claude Code, Synara/Conductor attribution) | in-process modules of the daemon | Rust | bundled |
 | Community adapters | separate processes on the socket | any | optional |
 | Menu bar app | primary UI (tray + settings + focus HUD) | Tauri 2 + React (`apps/microbridge-ui`) | yes (default install) |
 
@@ -23,15 +23,16 @@ line; regressions are release blockers.
 |---|---|---|
 | Idle CPU | near-idle with bounded wakeups | local session and frontmost-app watchers are event-driven; enabled hardware input is drained on a 16 ms tick, and an enabled paired T3 adapter refreshes at 900 ms with exponential backoff. |
 | Idle RSS (daemon) | < 15 MB, target single-digit | single static Rust binary, no runtime |
-| Network | explicit only | no telemetry; update checks are opt-in and T3 traffic requires an enabled, paired environment |
+| Network | explicit only | no telemetry; update checks are opt-in, T3 traffic requires an enabled paired environment, and Factory invokes the signed-in Droid CLI only for a requested control |
 | Device traffic | bytes per state *transition* | LED frames written only when resolved state changes; a 32–64 byte HID report each |
 | Disk | config file + log (rotated) | logs at `info` are transition-only |
 
 First-party adapters are compiled into the daemon precisely to protect this
 budget: watching `~/.codex/sessions` or Claude Code hooks is file watching.
 The paired T3 adapter uses a bounded refresh with exponential backoff because
-the supported HTTP contract is snapshot-based. Cursor uses one-shot managed
-hooks and leaves no resident helper process.
+the supported HTTP contract is snapshot-based. Cursor and Factory use one-shot
+managed hooks and leave no resident helper process. Factory starts Droid
+JSON-RPC only for an interrupt or reasoning-effort action and exits afterward.
 
 ## Focus model — "one owner, no fighting"
 
@@ -62,8 +63,9 @@ owner and only when that owner advertised the required capability.
 - Management messages require a completed, protocol-compatible `ui` handshake.
   Client roles prevent accidental adapter privilege; they do not claim to
   isolate mutually hostile processes already running as the same user.
-- The daemon executes nothing: actions are JSON commands to adapters, which
-  decide what they mean in their own app's context.
+- Actions route only through advertised host contracts. Most are JSON commands
+  to adapters; Factory actions start the user-installed `droid` CLI in its
+  documented JSON-RPC mode for that single request.
 - Hardware access is best-effort reverse engineering of the Micro's HID
   protocol; the device layer is isolated in `mb-device` so a firmware change
   cannot ripple past one crate.

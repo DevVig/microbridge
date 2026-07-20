@@ -42,6 +42,7 @@ struct TokenResponse {
 #[serde(rename_all = "camelCase")]
 struct EnvironmentDescriptor {
     server_version: String,
+    environment_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,10 +88,10 @@ pub fn capabilities() -> AdapterCapabilities {
         approval_acceptance: true,
         approval_rejection: true,
         interrupt: true,
-        // T3 requires a user message and project bootstrap to create a session;
-        // opening UI focus is intentionally not guessed through automation.
         new_session: false,
-        focus_open: false,
+        // T3 publishes a stable, semantic deep link for a specific environment
+        // and thread. This deliberately avoids synthesizing UI keybindings.
+        focus_open: true,
         // Enabled dynamically only when provider option descriptors become
         // available over the paired HTTP contract.
         reasoning_effort: false,
@@ -275,6 +276,7 @@ pub fn spawn(
         let mut runtime = HashMap::<String, RuntimeThread>::new();
         let mut credential: Option<T3Credential> = None;
         let mut verified_version: Option<String> = None;
+        let mut environment_id: Option<String> = None;
         let mut was_enabled = false;
         let mut failures = 0u32;
         let mut retry_after = tokio::time::Instant::now();
@@ -290,6 +292,7 @@ pub fn spawn(
                         was_enabled = false;
                         credential = None;
                         verified_version = None;
+                        environment_id = None;
                         runtime.clear();
                         continue;
                     }
@@ -305,6 +308,7 @@ pub fn spawn(
                         match fetch_descriptor(&client, active).await {
                             Ok(descriptor) if contract_is_supported(&descriptor.server_version) => {
                                 verified_version = Some(descriptor.server_version.clone());
+                                environment_id = Some(descriptor.environment_id.clone());
                                 shared.lock().await.set_adapter_version(
                                     "t3code",
                                     Some(descriptor.server_version),
@@ -354,6 +358,7 @@ pub fn spawn(
                             let _ = forget_credential();
                             credential = None;
                             verified_version = None;
+                            environment_id = None;
                             runtime.clear();
                             let mut state = shared.lock().await;
                             state.remove_owner_sessions(T3_OWNER);
@@ -382,7 +387,13 @@ pub fn spawn(
                     let ServerMessage::Action { session_id, action } = message else { continue };
                     let Some(active) = credential.as_ref() else { continue };
                     let Some(thread) = runtime.get(&session_id).cloned() else { continue };
-                    if let Err(error) = dispatch_action(&client, active, &thread.shell, action).await {
+                    if let Err(error) = dispatch_action(
+                        &client,
+                        active,
+                        environment_id.as_deref(),
+                        &thread.shell,
+                        action,
+                    ).await {
                         warn!(%error, ?action, session_id, "T3 action failed");
                     }
                 }
@@ -488,7 +499,7 @@ async fn apply_snapshot(
         "t3code",
         AdapterConnectionState::Limited,
         capabilities(),
-        "Paired lifecycle, approvals, and interrupt are ready. Focus and effort await an advertised HTTP capability.",
+        "Paired lifecycle, approvals, interrupt, and native thread focus are ready. Effort remains disabled until T3 advertises provider option descriptors.",
     );
 }
 
@@ -520,9 +531,13 @@ fn map_state(thread: &ThreadShell) -> AgentState {
 async fn dispatch_action(
     client: &reqwest::Client,
     credential: &T3Credential,
+    environment_id: Option<&str>,
     thread: &ThreadShell,
     action: Action,
 ) -> Result<(), String> {
+    if action == Action::OpenFocusedThread {
+        return open_thread(environment_id, &thread.id);
+    }
     let command_id = format!("microbridge-{}", now_ms());
     let created_at = now_iso();
     let command = match action {
@@ -570,6 +585,33 @@ async fn dispatch_action(
         .error_for_status()
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn open_thread(environment_id: Option<&str>, thread_id: &str) -> Result<(), String> {
+    let environment_id = environment_id
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "T3 Code did not expose its environment id.".to_string())?;
+    let mut url = Url::parse("t3code://threads/").map_err(|error| error.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "could not construct the T3 Code thread link".to_string())?
+        .push(environment_id)
+        .push(thread_id);
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg(url.as_str())
+            .status()
+            .map_err(|error| format!("could not open T3 Code: {error}"))?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| "macOS could not open the T3 Code thread link.".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+        Err("T3 Code thread focus is currently available on macOS only.".into())
+    }
 }
 
 async fn fetch_pending_approval_id(
@@ -711,6 +753,7 @@ mod tests {
         let error = dispatch_action(
             &reqwest::Client::new(),
             &credential,
+            Some("environment-1"),
             &thread,
             Action::Interrupt,
         )
@@ -718,5 +761,15 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "T3 Code has no active turn to interrupt.");
+    }
+
+    #[test]
+    fn constructs_the_official_t3_thread_deep_link() {
+        let mut url = Url::parse("t3code://threads/").unwrap();
+        url.path_segments_mut()
+            .unwrap()
+            .push("environment 1")
+            .push("thread/1");
+        assert_eq!(url.as_str(), "t3code://threads/environment%201/thread%2F1");
     }
 }

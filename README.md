@@ -2,9 +2,9 @@
 
 **An open-source control plane for the Codex Micro — one macropad, every coding agent.**
 
-Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; keys route only the actions each adapter explicitly advertises, so unsupported controls never report false success. No vendor desktop app is required for Microbridge itself.
+Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, Synara, Conductor, Factory, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; keys route only the actions each adapter explicitly advertises, so unsupported controls never report false success. No vendor desktop app is required for Microbridge itself.
 
-> **Status: early public alpha (`v0.2.x`).** Menu bar UI, local daemon, in-process Codex/Claude watchers, and signed macOS packages are shipping. Cursor lifecycle reception and paired T3 Code control are opt-in and capability-gated. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; hardware control stays off until enabled in Device settings (or `MICROBRIDGE_HID_CLAIM=1` is set for diagnostics) while physical validation is completed. See [docs/device-hid.md](docs/device-hid.md).
+> **Status: early public alpha (`v0.2.x`).** Menu bar UI, local daemon, in-process Codex/Claude host attribution, and signed macOS packages are shipping. Cursor and Factory lifecycle reception and paired T3 Code control are opt-in and capability-gated. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; hardware control stays off until enabled in Device settings (or `MICROBRIDGE_HID_CLAIM=1` is set for diagnostics) while physical validation is completed. See [docs/device-hid.md](docs/device-hid.md).
 
 ## Screenshots
 
@@ -41,7 +41,7 @@ The Micro's best feature — bidirectional Agent Keys — currently works throug
 ## Design principles
 
 1. **Invisible footprint.** Local watchers are event-driven; device input and an explicitly paired T3 connection use bounded polling and backoff. Idle CPU and RSS remain part of the [footprint budget](docs/architecture.md#footprint-budget).
-2. **Local-first and explicit network access.** There is no telemetry or cloud relay. The app checks for updates only when requested or enabled, and the daemon contacts a T3 environment only after the user enables the adapter and supplies a one-time pairing link.
+2. **Local-first and explicit network access.** There is no telemetry or Microbridge cloud relay. The app checks for updates only when requested or enabled, and the daemon contacts a T3 environment only after the user enables the adapter and supplies a one-time pairing link. Factory controls invoke the user-installed `droid` CLI only when a hardware action is requested.
 3. **Rust core, any-language adapters.** The always-resident part is a single static Rust binary. First-party adapters compile into it (in-process, ~zero overhead). Community adapters are separate processes speaking [newline-delimited JSON](docs/protocol.md) — write one in whatever you like.
 4. **The menu bar app is the product UI.** Configure keys, lighting, and adapters there. The daemon keeps the hardware alive underneath; `microbridgectl` is a support/debug escape hatch.
 
@@ -49,6 +49,13 @@ Cursor support is included in the Microbridge app and repository. Enable it
 once in **Settings → Adapters**; Microbridge installs its bundled lifecycle
 integration into Cursor's supported local-plugin directory. There is no
 separate Marketplace download or second product to maintain.
+
+Factory support is also bundled. Enabling it merges Microbridge-owned entries
+into Factory's official user hooks without replacing existing hooks; the knob
+uses Factory's public JSON-RPC session settings and only cycles levels the
+active model advertises. Synara and Conductor sessions are attributed through
+the built-in Codex/Claude watchers, so they need no pairing code or extra
+background adapter.
 
 ## Architecture
 

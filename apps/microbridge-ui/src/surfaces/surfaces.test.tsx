@@ -35,6 +35,7 @@ function snapshot(sessions: SessionStatus[] = []): Snapshot {
         claude: { enabled: true },
         cursor: { enabled: true },
         t3code: { enabled: false },
+        factory: { enabled: false },
       },
       hardware_control_enabled: false,
       brightness: 80,
@@ -97,7 +98,7 @@ describe("Settings", () => {
     expect(html).toContain("limited");
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
-    expect(html).toContain("Cursor ships inside Microbridge");
+    expect(html).toContain("Cursor and Factory ship inside Microbridge");
     expect(html).toContain("Repair bundled integration");
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");

@@ -4,6 +4,7 @@
 mod bus;
 
 use std::fs::{self, OpenOptions};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -312,6 +313,246 @@ fn sync_cursor_integration(app: &AppHandle, synced: &AtomicBool, enabled: bool) 
     }
 }
 
+const FACTORY_HOOK_EVENTS: &[&str] = &[
+    "SessionStart",
+    "UserPromptSubmit",
+    "Notification",
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+    "SessionEnd",
+];
+static FACTORY_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn factory_hooks_path() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_string())?;
+    Ok(PathBuf::from(home).join(".factory/hooks.json"))
+}
+
+fn factory_bridge_destination() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_string())?;
+    Ok(PathBuf::from(home).join(".microbridge/integrations/factory/microbridgectl"))
+}
+
+fn microbridgectl_source() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            candidates.push(directory.join("microbridgectl"));
+        }
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest.join("../../../target/debug/microbridgectl"));
+    candidates.push(manifest.join("../../../target/release/microbridgectl"));
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(PathBuf::from(home).join(".local/bin/microbridgectl"));
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/microbridgectl"),
+        PathBuf::from("/usr/local/bin/microbridgectl"),
+    ]);
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            "The bundled microbridgectl helper is missing. Reinstall Microbridge.".into()
+        })
+}
+
+fn factory_hook_command(binary: &Path) -> String {
+    let escaped = binary.to_string_lossy().replace('\'', "'\\''");
+    format!("'{escaped}' factory-event")
+}
+
+fn merge_factory_hooks(
+    root: &mut serde_json::Value,
+    command: &str,
+    install: bool,
+) -> Result<(), String> {
+    if !root.is_object() {
+        *root = serde_json::json!({});
+    }
+    let hooks = root
+        .as_object_mut()
+        .expect("object initialized")
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks.is_object() {
+        return Err(
+            "Factory hooks.json has a non-object `hooks` value; preserving it unchanged.".into(),
+        );
+    }
+    let hooks = hooks.as_object_mut().expect("validated object");
+    for event in FACTORY_HOOK_EVENTS {
+        let groups = hooks
+            .entry((*event).to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        let groups = groups.as_array_mut().ok_or_else(|| {
+            format!("Factory {event} hooks are not an array; preserving them unchanged.")
+        })?;
+        for group in groups.iter_mut() {
+            let Some(commands) = group
+                .get_mut("hooks")
+                .and_then(|value| value.as_array_mut())
+            else {
+                continue;
+            };
+            commands.retain(|hook| {
+                hook.get("command")
+                    .and_then(|value| value.as_str())
+                    .is_none_or(|existing| existing != command)
+            });
+        }
+        groups.retain(|group| {
+            group
+                .get("hooks")
+                .and_then(|value| value.as_array())
+                .is_none_or(|commands| !commands.is_empty())
+        });
+        if install {
+            groups.push(serde_json::json!({
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": command,
+                    "timeout": 10
+                }]
+            }));
+        }
+    }
+    Ok(())
+}
+
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "hooks path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("create {}: {error}", parent.display()))?;
+    let staging = path.with_extension("json.microbridge.tmp");
+    let body = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    fs::write(&staging, body).map_err(|error| format!("write {}: {error}", staging.display()))?;
+    fs::rename(&staging, path).map_err(|error| format!("replace {}: {error}", path.display()))
+}
+
+fn install_factory_integration() -> Result<PathBuf, String> {
+    let _operation = FACTORY_HOOK_LOCK
+        .lock()
+        .map_err(|_| "Factory integration installer lock is unavailable".to_string())?;
+    let source = microbridgectl_source()?;
+    let destination = factory_bridge_destination()?;
+    let hooks_path = factory_hooks_path()?;
+    let mut hooks = if hooks_path.is_file() {
+        let body = fs::read_to_string(&hooks_path)
+            .map_err(|error| format!("read {}: {error}", hooks_path.display()))?;
+        serde_json::from_str(&body)
+            .map_err(|error| format!("parse {}: {error}", hooks_path.display()))?
+    } else {
+        serde_json::json!({})
+    };
+    merge_factory_hooks(&mut hooks, &factory_hook_command(&destination), true)?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Factory helper has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("create {}: {error}", parent.display()))?;
+    let staging = destination.with_extension("installing");
+    fs::copy(&source, &staging).map_err(|error| format!("copy Factory helper: {error}"))?;
+    fs::set_permissions(&staging, fs::Permissions::from_mode(0o755))
+        .map_err(|error| format!("make Factory helper executable: {error}"))?;
+    let backup = destination.with_extension("backup");
+    if backup.exists() {
+        fs::remove_file(&backup)
+            .map_err(|error| format!("remove stale {}: {error}", backup.display()))?;
+    }
+    if destination.exists() {
+        fs::rename(&destination, &backup)
+            .map_err(|error| format!("prepare Factory helper update: {error}"))?;
+    }
+    if let Err(error) = fs::rename(&staging, &destination) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &destination);
+        }
+        return Err(format!("install Factory helper: {error}"));
+    }
+    if let Err(error) = write_json_atomic(&hooks_path, &hooks) {
+        let _ = fs::remove_file(&destination);
+        if backup.exists() {
+            let _ = fs::rename(&backup, &destination);
+        }
+        return Err(error);
+    }
+    if backup.exists() {
+        fs::remove_file(&backup).map_err(|error| format!("remove old Factory helper: {error}"))?;
+    }
+    Ok(hooks_path)
+}
+
+fn remove_factory_integration() -> Result<bool, String> {
+    let _operation = FACTORY_HOOK_LOCK
+        .lock()
+        .map_err(|_| "Factory integration installer lock is unavailable".to_string())?;
+    let destination = factory_bridge_destination()?;
+    let hooks_path = factory_hooks_path()?;
+    let mut changed = false;
+    if hooks_path.is_file() {
+        let body = fs::read_to_string(&hooks_path)
+            .map_err(|error| format!("read {}: {error}", hooks_path.display()))?;
+        let mut hooks: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|error| format!("parse {}: {error}", hooks_path.display()))?;
+        let before = hooks.clone();
+        merge_factory_hooks(&mut hooks, &factory_hook_command(&destination), false)?;
+        if hooks != before {
+            write_json_atomic(&hooks_path, &hooks)?;
+            changed = true;
+        }
+    }
+    if destination.is_file() {
+        fs::remove_file(&destination)
+            .map_err(|error| format!("remove {}: {error}", destination.display()))?;
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn sync_factory_integration(synced: &AtomicBool, enabled: bool) {
+    if !enabled {
+        synced.store(false, Ordering::Relaxed);
+        return;
+    }
+    if !synced.swap(true, Ordering::Relaxed) && install_factory_integration().is_err() {
+        synced.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod factory_integration_tests {
+    use super::*;
+
+    #[test]
+    fn merges_and_removes_only_microbridge_factory_hooks() {
+        let command = "'/tmp/microbridgectl' factory-event";
+        let mut value = serde_json::json!({
+            "hooks": {
+                "Stop": [{"matcher":"*","hooks":[{"type":"command","command":"keep-me"}]}]
+            }
+        });
+        merge_factory_hooks(&mut value, command, true).unwrap();
+        for event in FACTORY_HOOK_EVENTS {
+            assert!(value["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|group| group["hooks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|hook| hook["command"] == command)));
+        }
+        merge_factory_hooks(&mut value, command, false).unwrap();
+        assert_eq!(value["hooks"]["Stop"][0]["hooks"][0]["command"], "keep-me");
+        assert!(!value.to_string().contains(command));
+    }
+}
+
 fn physical_tray_rect(rect: &tauri::Rect, scale: f64) -> (f64, f64, f64, f64) {
     let (x, y) = match rect.position {
         Position::Physical(p) => (p.x as f64, p.y as f64),
@@ -544,6 +785,30 @@ async fn set_adapter_enabled(
             }
         }
     }
+    if adapter_id == "factory" && enabled {
+        match install_factory_integration() {
+            Ok(path) => {
+                return Ok(format!(
+                    "{message} Factory lifecycle hooks installed in {}. New and active Droid sessions will appear automatically.",
+                    path.display()
+                ));
+            }
+            Err(error) => {
+                if !was_enabled {
+                    let _ = state
+                        .bus
+                        .adapter_operation(ClientMessage::SetAdapterEnabled {
+                            adapter_id: adapter_id.clone(),
+                            enabled: false,
+                        })
+                        .await;
+                }
+                return Err(format!(
+                    "Factory was not enabled because its hooks could not be installed: {error}"
+                ));
+            }
+        }
+    }
     Ok(message)
 }
 
@@ -576,10 +841,10 @@ async fn forget_adapter(
         .and_then(|snapshot| snapshot.config.adapters.get(&adapter_id))
         .map(|preference| preference.enabled)
         .unwrap_or(false);
-    let removed = if adapter_id == "cursor" {
-        remove_cursor_integration()?
-    } else {
-        false
+    let removed = match adapter_id.as_str() {
+        "cursor" => remove_cursor_integration()?,
+        "factory" => remove_factory_integration()?,
+        _ => false,
     };
     let operation = state
         .bus
@@ -591,7 +856,11 @@ async fn forget_adapter(
         Ok(message) => message,
         Err(error) => {
             if removed {
-                let _ = install_cursor_integration(&app);
+                if adapter_id == "cursor" {
+                    let _ = install_cursor_integration(&app);
+                } else if adapter_id == "factory" {
+                    let _ = install_factory_integration();
+                }
             }
             if was_enabled {
                 let _ = state
@@ -610,6 +879,11 @@ async fn forget_adapter(
     if adapter_id == "cursor" && removed {
         return Ok(format!(
             "{message} The bundled Cursor integration was removed. Reload Cursor once if it is already open."
+        ));
+    }
+    if adapter_id == "factory" && removed {
+        return Ok(format!(
+            "{message} The Microbridge-owned Factory hooks and helper were removed."
         ));
     }
     Ok(message)
@@ -831,6 +1105,8 @@ pub fn run() {
             let handle = app.handle().clone();
             let cursor_integration_synced = Arc::new(AtomicBool::new(false));
             let cursor_sync_loop = Arc::clone(&cursor_integration_synced);
+            let factory_integration_synced = Arc::new(AtomicBool::new(false));
+            let factory_sync_loop = Arc::clone(&factory_integration_synced);
 
             tauri::async_runtime::spawn(async move {
                 let mut last_focus: Option<String> = None;
@@ -845,6 +1121,13 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(false);
                             sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
+                            let factory_enabled = s
+                                .config
+                                .adapters
+                                .get("factory")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_factory_integration(&factory_sync_loop, factory_enabled);
                             last_focus = s.focused_session_id.clone();
                             saw_snapshot = true;
                             *snap_for_loop.lock().await = Some(s.clone());
@@ -870,6 +1153,12 @@ pub fn run() {
                                     .map(|preference| preference.enabled)
                                     .unwrap_or(false);
                                 sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
+                                let factory_enabled = config
+                                    .adapters
+                                    .get("factory")
+                                    .map(|preference| preference.enabled)
+                                    .unwrap_or(false);
+                                sync_factory_integration(&factory_sync_loop, factory_enabled);
                             }
                             let focus_changed = matches!(&event, BusEvent::FocusChanged { .. });
                             let mut guard = snap_for_loop.lock().await;
@@ -895,6 +1184,12 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(false);
                             sync_cursor_integration(&handle, &cursor_sync_loop, cursor_enabled);
+                            let factory_enabled = config
+                                .adapters
+                                .get("factory")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_factory_integration(&factory_sync_loop, factory_enabled);
                             let mut guard = snap_for_loop.lock().await;
                             if let Some(s) = guard.as_mut() {
                                 s.config = config;

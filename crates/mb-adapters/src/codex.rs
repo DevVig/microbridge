@@ -189,6 +189,8 @@ fn codex_app_label(originator: Option<&str>, cwd: Option<&str>) -> String {
     const ORIGINATORS: &[(&str, &str)] = &[
         ("t3code", "T3 Code"),
         ("synara", "Synara"),
+        ("conductor", "Conductor"),
+        ("factory", "Factory"),
         ("codex desktop", "Codex Desktop"),
         ("codex_work_desktop", "Codex Desktop"),
     ];
@@ -291,6 +293,7 @@ mod tests {
 
         assert_eq!(codex_app_label(Some("synara_desktop"), None), "Synara");
         assert_eq!(codex_app_label(Some("t3code_desktop"), None), "T3 Code");
+        assert_eq!(codex_app_label(Some("factory_desktop"), None), "Factory");
         // The desktop app writes a display-cased originator.
         assert_eq!(
             codex_app_label(Some("Codex Desktop"), None),
@@ -315,6 +318,13 @@ mod tests {
         assert_eq!(
             codex_app_label(None, Some(&format!("{home}/.synara/worktrees/app/branch"))),
             "Synara"
+        );
+        assert_eq!(
+            codex_app_label(
+                Some("codex_sdk_ts"),
+                Some(&format!("{home}/conductor/workspaces/app/branch"))
+            ),
+            "Conductor"
         );
     }
 

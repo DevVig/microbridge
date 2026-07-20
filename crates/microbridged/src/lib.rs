@@ -2,6 +2,7 @@
 
 pub mod app_match;
 pub mod config;
+pub mod factory;
 pub mod frontmost;
 pub mod key_source;
 pub mod registry;

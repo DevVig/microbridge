@@ -300,6 +300,13 @@ mod tests {
             ),
             "Cursor"
         );
+        assert_eq!(
+            claude_app_label(
+                Some("sdk-ts"),
+                Some(&format!("{home}/conductor/workspaces/Quux"))
+            ),
+            "Conductor"
+        );
 
         // Missing entrypoint stays back-compatible.
         assert_eq!(claude_app_label(None, None), "Claude Code");

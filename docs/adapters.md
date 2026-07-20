@@ -23,7 +23,7 @@ of dependency-free Node).
 
 Prefer, in order:
 
-1. **Official hooks/APIs** — e.g. Cursor managed plugin hooks and T3 Code's
+1. **Official hooks/APIs** — e.g. Cursor/Factory hooks, Factory JSON-RPC, and T3 Code's
    authenticated paired HTTP GET/POST orchestration contract. Stable and
    supported.
 2. **Session files** — many runtimes journal to disk (e.g.
@@ -53,5 +53,6 @@ the daemon to keep the resident footprint at one process. Community adapters
 live in `adapters/<name>/` in any language and run as their own process. A
 community adapter that proves stable and broadly used can graduate to
 in-process. T3 Code is daemon-owned because its paired credential and action
-routing must share Microbridge's consent boundary. Cursor remains host-managed
-so Cursor owns plugin uninstall cleanup.
+routing must share Microbridge's consent boundary. Cursor and Factory remain
+host-managed so each host owns hook execution and Microbridge owns only the
+entries it installs. Synara and Conductor reuse the built-in journal watchers.

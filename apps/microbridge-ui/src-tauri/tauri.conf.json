@@ -72,7 +72,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/microbridged"],
+    "externalBin": ["binaries/microbridged", "binaries/microbridgectl"],
     "createUpdaterArtifacts": true,
     "resources": {
       "../../../adapters/cursor/.cursor-plugin/plugin.json": "cursor-plugin/.cursor-plugin/plugin.json",

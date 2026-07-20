@@ -54,7 +54,7 @@ const KEY_SOURCES: {
   {
     id: "focused_app",
     label: "Focused app",
-    hint: "Owning IDE — newest threads (Claude, Codex, Cursor, Synara, T3)",
+    hint: "Owning app — newest threads (Claude, Codex, Cursor, Synara, T3, Conductor, Factory)",
   },
   {
     id: "most_recent",
@@ -580,13 +580,16 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Adapters</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Cursor ships inside Microbridge and installs locally with one
-              click. Community describes ownership, not readiness. State and
-              capabilities below are live.
+              Cursor and Factory ship inside Microbridge and install locally
+              with one click. Synara and Conductor are identified through the
+              built-in Codex and Claude journal watchers. State and capabilities
+              below are live.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              T3-hosted Codex threads are identified automatically. Enable and pair
-              the T3 Code card only when you also want T3&apos;s supported thread controls.
+              T3-hosted threads are identified automatically. For controls, enable
+              Network access in T3 Code Settings → Connections, create a link under
+              Authorized clients, then paste it below. Factory hooks are merged
+              without replacing your existing hooks.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
@@ -685,12 +688,16 @@ export function Settings({
                           void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, true))
                         }
                       >
-                        {adapter.id === "cursor" ? "Enable Cursor" : "Enable integration"}
+                        {adapter.id === "cursor"
+                          ? "Enable Cursor"
+                          : adapter.id === "factory"
+                            ? "Enable Factory"
+                            : "Enable integration"}
                       </button>
                     )}
                     {adapter.kind === "community" && cfg.adapters[adapter.id]?.enabled && (
                       <>
-                        {adapter.id === "cursor" && (
+                        {(adapter.id === "cursor" || adapter.id === "factory") && (
                           <button
                             type="button"
                             disabled={adapterBusy.has(adapter.id)}

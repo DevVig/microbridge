@@ -117,6 +117,19 @@ Cursor's supported local-plugin directory after that explicit consent. Reload
 Cursor once if it is already open. **Remove** disables the adapter and removes
 only Microbridge's local integration. No Marketplace download is required.
 
+### Factory integration
+
+Factory support ships inside Microbridge. Open **Settings → Adapters** and
+click **Enable Factory**. Microbridge copies its signed `microbridgectl` helper
+to `~/.microbridge/integrations/factory/` and merges only its own entries into
+Factory's supported `~/.factory/hooks.json`; existing hooks are preserved.
+**Remove** deletes the Microbridge-owned hook entries and helper. Droid must be
+installed and signed in for interrupt and reasoning-effort controls.
+
+Synara and Conductor do not need an installer: their Codex/Claude sessions are
+named by the built-in journal watchers. T3 Code controls require the one-time
+pairing flow shown in **Settings → Adapters**.
+
 **Note:** Homebrew installs **prebuilt** release binaries (not a from-source
 Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 
@@ -132,6 +145,8 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | `~/.microbridge/config.toml` | Key source, lighting, appearance |
 | `~/.microbridge/daemon.log` | launchd / service logs |
 | `~/.cursor/plugins/local/microbridge` | Bundled Cursor lifecycle integration (only after consent) |
+| `~/.factory/hooks.json` | Existing Factory hooks plus Microbridge-owned lifecycle entries (only after consent) |
+| `~/.microbridge/integrations/factory/microbridgectl` | Signed Factory hook helper (only after consent) |
 | `~/Library/LaunchAgents/ai.microbridge.ui.plist` | Login item (only if you enable launch at login) |
 
 ## Launch at login

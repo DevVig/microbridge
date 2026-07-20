@@ -317,17 +317,30 @@ impl DaemonState {
                 "session id must use the {expected_prefix}<session> namespace"
             ));
         }
+        let internal_owner = self.adapter_connections.iter().find_map(|(owner, id)| {
+            (id == adapter_id && *owner >= u64::MAX - 1024).then_some(*owner)
+        });
+        let capabilities = internal_owner
+            .and_then(|owner| self.adapter_capabilities.get(&owner).cloned())
+            .unwrap_or_else(AdapterCapabilities::lifecycle_only);
         let status = self
             .adapters
             .get_mut(adapter_id)
             .ok_or_else(|| format!("unknown adapter: {adapter_id}"))?;
-        status.state = AdapterConnectionState::Limited;
-        status.capabilities = AdapterCapabilities::lifecycle_only();
+        status.state = if internal_owner.is_some() {
+            AdapterConnectionState::Connected
+        } else {
+            AdapterConnectionState::Limited
+        };
+        status.capabilities = capabilities;
         status.last_activity_ms = Some(now_ms());
-        status.diagnostic =
-            "Lifecycle is connected; unsupported IDE commands remain disabled.".into();
+        status.diagnostic = if adapter_id == "factory" {
+            "Factory lifecycle, interrupt, and model-aware reasoning effort are connected through official hooks and JSON-RPC.".into()
+        } else {
+            "Lifecycle is connected; unsupported IDE commands remain disabled.".into()
+        };
         let id = session.id.clone();
-        self.upsert_session(session, 0);
+        self.upsert_session(session, internal_owner.unwrap_or(0));
         self.leased_sessions.insert(
             id,
             Instant::now() + Duration::from_millis(ttl_ms.clamp(1_000, 24 * 60 * 60 * 1000)),
@@ -657,6 +670,7 @@ fn setup_diagnostic(adapter_id: &str) -> String {
                 .into()
         }
         "t3code" => "Paste a one-time pairing link from T3 Code Settings → Connections.".into(),
+        "factory" => "Enable the bundled Factory lifecycle hooks to connect Droid sessions.".into(),
         _ => "Waiting for the adapter to connect.".into(),
     }
 }
@@ -665,6 +679,7 @@ fn reconnect_diagnostic(adapter_id: &str) -> String {
     match adapter_id {
         "cursor" => "Cursor is enabled, but no lifecycle event has arrived yet. Reload Cursor if it was already open.".into(),
         "t3code" => "T3 Code is enabled, but its paired connection is offline.".into(),
+        "factory" => "Factory is enabled, but no Droid lifecycle event has arrived yet.".into(),
         _ => "Adapter is offline.".into(),
     }
 }
@@ -719,8 +734,11 @@ fn initial_adapter_statuses(config: &DaemonConfig) -> BTreeMap<String, AdapterSt
     BTreeMap::from([
         ("claude".into(), native("claude", "Claude Code")),
         ("codex".into(), native("codex", "Codex CLI")),
+        ("synara".into(), native("synara", "Synara")),
+        ("conductor".into(), native("conductor", "Conductor")),
         ("cursor".into(), opt_in("cursor", "Cursor")),
         ("t3code".into(), opt_in("t3code", "T3 Code")),
+        ("factory".into(), opt_in("factory", "Factory")),
     ])
 }
 

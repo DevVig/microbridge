@@ -137,10 +137,12 @@ jobs:
           npm ci
           # Bundle the daemon inside direct-download apps so the device twin
           # always has a real local source of truth without a separate install.
-          cargo build --manifest-path ../../Cargo.toml --release -p microbridged --target ${{ matrix.target }}
+          cargo build --manifest-path ../../Cargo.toml --release -p microbridged -p microbridgectl --target ${{ matrix.target }}
           mkdir -p src-tauri/binaries
           cp "../../target/${{ matrix.target }}/release/microbridged" \
             "src-tauri/binaries/microbridged-${{ matrix.target }}"
+          cp "../../target/${{ matrix.target }}/release/microbridgectl" \
+            "src-tauri/binaries/microbridgectl-${{ matrix.target }}"
           # createUpdaterArtifacts (tauri.conf.json) requires the updater signing
           # key. Forks without the secret still build — just without in-app
           # updater artifacts (they can use the DMG / Homebrew).
