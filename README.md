@@ -4,7 +4,7 @@
 
 Microbridge is a tiny local daemon that bridges AI coding agents — Codex CLI, Claude Code, Cursor, T3 Code, Synara, Conductor, Factory, and anything else with an adapter — to the [Work Louder Codex Micro](https://worklouder.cc/). Per-key RGB mirrors live agent state; keys route only the actions each adapter explicitly advertises, so unsupported controls never report false success. No vendor desktop app is required for Microbridge itself.
 
-> **Status: early public alpha (`v0.2.x`).** Menu bar UI, local daemon, in-process Codex/Claude host attribution, and signed macOS packages are shipping. Cursor and Factory lifecycle reception and paired T3 Code control are opt-in and capability-gated. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; hardware control stays off until enabled in Device settings (or `MICROBRIDGE_HID_CLAIM=1` is set for diagnostics) while physical validation is completed. See [docs/device-hid.md](docs/device-hid.md).
+> **Status: early public alpha (`v0.3.x`).** Menu bar UI, local daemon, in-process Codex/Claude host attribution, and signed macOS packages are shipping. Cursor and Factory lifecycle reception and paired T3 Code control are opt-in and capability-gated. **HID protocol (VID/PID, framing, `v.oai.thstatus`) is implemented from ChatGPT’s Work Louder kit**; hardware control stays off until enabled in Device settings (or `MICROBRIDGE_HID_CLAIM=1` is set for diagnostics) while physical validation is completed. See [docs/device-hid.md](docs/device-hid.md).
 
 ## Screenshots
 
