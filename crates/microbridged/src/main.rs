@@ -9,6 +9,7 @@ use std::sync::Arc;
 use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, AdapterEvent};
 use mb_device::open_default_device_with_claim;
 use microbridged::config::load_config;
+use microbridged::factory::{self, FACTORY_OWNER};
 use microbridged::frontmost::spawn_frontmost_watcher;
 use microbridged::socket::serve;
 use microbridged::state::DaemonState;
@@ -34,10 +35,18 @@ async fn main() -> std::io::Result<()> {
     info!(device = %device.descriptor().name, "device layer ready");
 
     let (t3_action_tx, t3_action_rx) = mpsc::unbounded_channel();
+    let (factory_action_tx, factory_action_rx) = mpsc::unbounded_channel();
     let mut daemon_state = DaemonState::new(device, config);
     daemon_state.install_internal_adapter(T3_OWNER, "t3code", t3code::capabilities(), t3_action_tx);
+    daemon_state.install_internal_adapter(
+        FACTORY_OWNER,
+        "factory",
+        factory::capabilities(),
+        factory_action_tx,
+    );
     let shared = Arc::new(Mutex::new(daemon_state));
     t3code::spawn(Arc::clone(&shared), t3_action_rx);
+    factory::spawn(Arc::clone(&shared), factory_action_rx);
 
     // Hardware notifications are non-blocking. This small bounded drain also
     // expires lease-backed IDE hook sessions without introducing network polling.

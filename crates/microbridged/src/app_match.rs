@@ -54,6 +54,8 @@ fn canonical_family(name: &str) -> Option<&'static str> {
         "T3 Code" => Some("t3"),
         "Cursor" => Some("cursor"),
         "Synara" => Some("synara"),
+        "Conductor" => Some("conductor"),
+        "Factory" => Some("factory"),
         "Codex CLI" => Some("codex"),
         "Claude Code" => Some("claude_code"),
         "Claude Desktop" => Some("claude_desktop"),
@@ -110,6 +112,8 @@ mod tests {
         assert!(same_app("Synara", "Synara"));
         assert!(!same_app("Cursor", "Synara"));
         assert!(!same_app("Cursor", "T3 Code"));
+        assert!(same_app("Conductor", "Conductor"));
+        assert!(same_app("Factory", "Factory"));
     }
 
     #[test]

@@ -39,6 +39,7 @@ async fn main() -> ExitCode {
         },
         "hid-capture" => run_hid_capture(args.next()),
         "cursor-event" => run_cursor_event(args.collect()).await,
+        "factory-event" => run_factory_event().await,
         "help" | "-h" | "--help" => {
             print_usage();
             ExitCode::SUCCESS
@@ -52,10 +53,92 @@ async fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    println!("Usage: microbridgectl [status | hid-capture [seconds] | cursor-event <id> <state> [title]]");
+    println!("Usage: microbridgectl [status | hid-capture [seconds] | cursor-event <id> <state> [title] | factory-event]");
     println!("  status                 print the live bus snapshot as JSON (default)");
     println!("  hid-capture [seconds]  observe raw Codex Micro key/dial/joystick events");
     println!("                         (default 120s; needs the `hid` feature + a device)");
+}
+
+async fn run_factory_event() -> ExitCode {
+    use std::io::Read;
+
+    let mut input = String::new();
+    if let Err(error) = std::io::stdin().read_to_string(&mut input) {
+        eprintln!("microbridgectl factory-event: read hook input: {error}");
+        return ExitCode::FAILURE;
+    }
+    let event: serde_json::Value = match serde_json::from_str(&input) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("microbridgectl factory-event: invalid hook input: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let Some(session_id) = event.get("session_id").and_then(|value| value.as_str()) else {
+        eprintln!("microbridgectl factory-event: hook input has no session_id");
+        return ExitCode::FAILURE;
+    };
+    let hook = event
+        .get("hook_event_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("SessionStart");
+    let text = ["message", "notification", "prompt"]
+        .iter()
+        .filter_map(|key| event.get(key).and_then(|value| value.as_str()))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let state = match hook {
+        "SessionStart" | "UserPromptSubmit" => AgentState::Thinking,
+        "PreToolUse" | "PostToolUse" => AgentState::Working,
+        "Notification"
+            if text.contains("permission")
+                || text.contains("approval")
+                || text.contains("input") =>
+        {
+            AgentState::AwaitingApproval
+        }
+        "Notification" => AgentState::Thinking,
+        "Stop" => AgentState::Done,
+        "SessionEnd" => AgentState::Idle,
+        _ => AgentState::Working,
+    };
+    let title = event
+        .get("cwd")
+        .and_then(|value| value.as_str())
+        .and_then(|cwd| std::path::Path::new(cwd).file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Factory Droid")
+        .to_string();
+    let session = SessionStatus {
+        id: format!("factory:{session_id}"),
+        app: "Factory".into(),
+        title,
+        state,
+        updated_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    };
+    match send_operation(ClientMessage::IngestLifecycle {
+        adapter_id: "factory".into(),
+        session,
+        ttl_ms: if hook == "SessionEnd" {
+            1_000
+        } else {
+            24 * 60 * 60 * 1000
+        },
+    })
+    .await
+    {
+        // Factory consumes SessionStart stdout as context, so success must be silent.
+        Ok(_) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("microbridgectl factory-event: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 async fn run_cursor_event(args: Vec<String>) -> ExitCode {

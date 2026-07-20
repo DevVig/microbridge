@@ -189,7 +189,7 @@ with `{"type":"config_error","message":"…"}`.
 | Mode | Behavior |
 |---|---|
 | `most_recent` | Cross-app; six newest sessions |
-| `focused_app` | Owning IDE's newest sessions (default; Claude / Codex / Cursor / Synara / T3 families match frontmost aliases + channel suffixes) |
+| `focused_app` | Owning app's newest sessions (default; Claude / Codex / Cursor / Synara / T3 / Conductor / Factory families match frontmost aliases + channel suffixes) |
 | `pinned` | First six `pinned_session_ids` |
 | `priority` | Approvals / active / app-priority ordering |
 | `custom` | Explicit `custom_key_ids` (empty string = unassigned) |

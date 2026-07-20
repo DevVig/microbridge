@@ -16,14 +16,15 @@
 pub(crate) fn host_from_cwd(cwd: Option<&str>) -> Option<&'static str> {
     let cwd = cwd?;
     let home = std::env::var("HOME").ok()?;
-    // (home-relative dir, display name) — Synara / T3 Code / Cursor all keep
-    // their worktrees under a dot-directory in $HOME. The display name doubles
+    // (home-relative dir, display name) — supported hosts keep their worktrees
+    // under a stable directory in $HOME. The display name doubles
     // as the `focused_app` scope for Agent Keys, so it has to match the name
     // the rest of the app uses for that IDE.
     const HOSTS: &[(&str, &str)] = &[
         (".synara", "Synara"),
         (".t3", "T3 Code"),
         (".cursor", "Cursor"),
+        ("conductor/workspaces", "Conductor"),
     ];
     for (dir, name) in HOSTS {
         let prefix = format!("{home}/{dir}/");
