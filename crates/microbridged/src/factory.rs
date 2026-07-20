@@ -329,6 +329,6 @@ Model details:
     #[test]
     fn discovers_a_factory_droid_binary_outside_gui_path() {
         let binary = droid_binary();
-        assert!(binary.is_file() || binary == PathBuf::from("droid"));
+        assert!(binary.is_file() || binary == Path::new("droid"));
     }
 }
