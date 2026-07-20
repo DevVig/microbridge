@@ -1,6 +1,6 @@
 # Factory integration
 
-Enable Factory in **Microbridge Settings → Adapters**. The app transactionally
+Enable Factory in **Microbridge Settings → Integrations**. The app transactionally
 merges Microbridge-owned commands into Factory's official user hooks at
 `~/.factory/hooks.json` and installs a signed helper at
 `~/.microbridge/integrations/factory/microbridgectl`. Existing hooks are

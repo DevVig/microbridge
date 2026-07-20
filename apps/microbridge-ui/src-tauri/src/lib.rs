@@ -553,6 +553,156 @@ mod factory_integration_tests {
     }
 }
 
+const OPENCODE_PLUGIN_MARKER: &str = "MICROBRIDGE_OPENCODE_PLUGIN";
+const OPENCODE_PLUGIN_NAME: &str = "microbridge.mjs";
+static OPENCODE_PLUGIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn validate_opencode_plugin(path: &Path) -> Result<String, String> {
+    let source =
+        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    if !source.contains(OPENCODE_PLUGIN_MARKER) || !source.contains("export const Microbridge") {
+        return Err(format!(
+            "{} is not the Microbridge OpenCode integration",
+            path.display()
+        ));
+    }
+    Ok(source)
+}
+
+fn opencode_plugin_source(app: &AppHandle) -> Result<PathBuf, String> {
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?
+        .join("opencode-plugin")
+        .join(OPENCODE_PLUGIN_NAME);
+    if validate_opencode_plugin(&bundled).is_ok() {
+        return Ok(bundled);
+    }
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../adapters/opencode")
+        .join(OPENCODE_PLUGIN_NAME);
+    validate_opencode_plugin(&repository)?;
+    Ok(repository)
+}
+
+fn opencode_plugin_destination() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_string())?;
+    Ok(PathBuf::from(home)
+        .join(".config/opencode/plugins")
+        .join(OPENCODE_PLUGIN_NAME))
+}
+
+fn install_opencode_integration(app: &AppHandle) -> Result<PathBuf, String> {
+    let source = opencode_plugin_source(app)?;
+    let destination = opencode_plugin_destination()?;
+    install_opencode_integration_at(
+        &source,
+        &destination,
+        &app.package_info().version.to_string(),
+    )?;
+    Ok(destination)
+}
+
+fn install_opencode_integration_at(
+    source: &Path,
+    destination: &Path,
+    version: &str,
+) -> Result<(), String> {
+    let _operation = OPENCODE_PLUGIN_LOCK
+        .lock()
+        .map_err(|_| "OpenCode integration installer lock is unavailable".to_string())?;
+    let template = validate_opencode_plugin(source)?;
+    if destination.is_file() {
+        validate_opencode_plugin(destination).map_err(|_| {
+            format!(
+                "Preserving unowned OpenCode plugin at {}. Move it aside before enabling Microbridge.",
+                destination.display()
+            )
+        })?;
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "OpenCode plugin destination has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("create {}: {error}", parent.display()))?;
+    let rendered = template.replace("__MICROBRIDGE_VERSION__", version);
+    let staging = destination.with_extension("mjs.microbridge.tmp");
+    fs::write(&staging, rendered)
+        .map_err(|error| format!("write {}: {error}", staging.display()))?;
+    validate_opencode_plugin(&staging)?;
+    fs::rename(&staging, destination)
+        .map_err(|error| format!("install OpenCode integration: {error}"))
+}
+
+fn remove_opencode_integration() -> Result<bool, String> {
+    let destination = opencode_plugin_destination()?;
+    remove_opencode_integration_at(&destination)
+}
+
+fn remove_opencode_integration_at(destination: &Path) -> Result<bool, String> {
+    let _operation = OPENCODE_PLUGIN_LOCK
+        .lock()
+        .map_err(|_| "OpenCode integration installer lock is unavailable".to_string())?;
+    if !destination.exists() {
+        return Ok(false);
+    }
+    validate_opencode_plugin(destination).map_err(|_| {
+        format!(
+            "Preserving unowned OpenCode plugin at {}.",
+            destination.display()
+        )
+    })?;
+    fs::remove_file(destination)
+        .map_err(|error| format!("remove {}: {error}", destination.display()))?;
+    Ok(true)
+}
+
+fn sync_opencode_integration(app: &AppHandle, synced: &AtomicBool, enabled: bool) {
+    if !enabled {
+        synced.store(false, Ordering::Relaxed);
+        return;
+    }
+    if !synced.swap(true, Ordering::Relaxed) && install_opencode_integration(app).is_err() {
+        synced.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod opencode_integration_tests {
+    use super::*;
+
+    #[test]
+    fn installs_updates_and_removes_only_owned_opencode_plugin() {
+        let root =
+            std::env::temp_dir().join(format!("microbridge-opencode-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.mjs");
+        let destination = root.join("plugins/microbridge.mjs");
+        fs::write(
+            &source,
+            "// MICROBRIDGE_OPENCODE_PLUGIN\nconst v='__MICROBRIDGE_VERSION__';\nexport const Microbridge = async () => ({})\n",
+        )
+        .unwrap();
+
+        install_opencode_integration_at(&source, &destination, "0.4.0").unwrap();
+        let installed = fs::read_to_string(&destination).unwrap();
+        assert!(installed.contains("0.4.0"));
+        assert!(!installed.contains("__MICROBRIDGE_VERSION__"));
+        assert!(remove_opencode_integration_at(&destination).unwrap());
+        assert!(!destination.exists());
+
+        fs::write(&destination, "export const SomeoneElse = {}\n").unwrap();
+        assert!(install_opencode_integration_at(&source, &destination, "0.4.1").is_err());
+        assert!(remove_opencode_integration_at(&destination).is_err());
+        assert_eq!(
+            fs::read_to_string(&destination).unwrap(),
+            "export const SomeoneElse = {}\n"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
 fn physical_tray_rect(rect: &tauri::Rect, scale: f64) -> (f64, f64, f64, f64) {
     let (x, y) = match rect.position {
         Position::Physical(p) => (p.x as f64, p.y as f64),
@@ -809,6 +959,30 @@ async fn set_adapter_enabled(
             }
         }
     }
+    if adapter_id == "opencode" && enabled {
+        match install_opencode_integration(&app) {
+            Ok(path) => {
+                return Ok(format!(
+                    "{message} OpenCode integration installed at {}. Restart OpenCode once if it is already running.",
+                    path.display()
+                ));
+            }
+            Err(error) => {
+                if !was_enabled {
+                    let _ = state
+                        .bus
+                        .adapter_operation(ClientMessage::SetAdapterEnabled {
+                            adapter_id: adapter_id.clone(),
+                            enabled: false,
+                        })
+                        .await;
+                }
+                return Err(format!(
+                    "OpenCode was not enabled because its bundled integration could not be installed: {error}"
+                ));
+            }
+        }
+    }
     Ok(message)
 }
 
@@ -844,6 +1018,7 @@ async fn forget_adapter(
     let removed = match adapter_id.as_str() {
         "cursor" => remove_cursor_integration()?,
         "factory" => remove_factory_integration()?,
+        "opencode" => remove_opencode_integration()?,
         _ => false,
     };
     let operation = state
@@ -860,6 +1035,8 @@ async fn forget_adapter(
                     let _ = install_cursor_integration(&app);
                 } else if adapter_id == "factory" {
                     let _ = install_factory_integration();
+                } else if adapter_id == "opencode" {
+                    let _ = install_opencode_integration(&app);
                 }
             }
             if was_enabled {
@@ -884,6 +1061,11 @@ async fn forget_adapter(
     if adapter_id == "factory" && removed {
         return Ok(format!(
             "{message} The Microbridge-owned Factory hooks and helper were removed."
+        ));
+    }
+    if adapter_id == "opencode" && removed {
+        return Ok(format!(
+            "{message} The Microbridge-owned OpenCode integration was removed. Restart OpenCode if it is running."
         ));
     }
     Ok(message)
@@ -1107,6 +1289,8 @@ pub fn run() {
             let cursor_sync_loop = Arc::clone(&cursor_integration_synced);
             let factory_integration_synced = Arc::new(AtomicBool::new(false));
             let factory_sync_loop = Arc::clone(&factory_integration_synced);
+            let opencode_integration_synced = Arc::new(AtomicBool::new(false));
+            let opencode_sync_loop = Arc::clone(&opencode_integration_synced);
 
             tauri::async_runtime::spawn(async move {
                 let mut last_focus: Option<String> = None;
@@ -1128,6 +1312,17 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(false);
                             sync_factory_integration(&factory_sync_loop, factory_enabled);
+                            let opencode_enabled = s
+                                .config
+                                .adapters
+                                .get("opencode")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_opencode_integration(
+                                &handle,
+                                &opencode_sync_loop,
+                                opencode_enabled,
+                            );
                             last_focus = s.focused_session_id.clone();
                             saw_snapshot = true;
                             *snap_for_loop.lock().await = Some(s.clone());
@@ -1159,6 +1354,16 @@ pub fn run() {
                                     .map(|preference| preference.enabled)
                                     .unwrap_or(false);
                                 sync_factory_integration(&factory_sync_loop, factory_enabled);
+                                let opencode_enabled = config
+                                    .adapters
+                                    .get("opencode")
+                                    .map(|preference| preference.enabled)
+                                    .unwrap_or(false);
+                                sync_opencode_integration(
+                                    &handle,
+                                    &opencode_sync_loop,
+                                    opencode_enabled,
+                                );
                             }
                             let focus_changed = matches!(&event, BusEvent::FocusChanged { .. });
                             let mut guard = snap_for_loop.lock().await;
@@ -1190,6 +1395,16 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(false);
                             sync_factory_integration(&factory_sync_loop, factory_enabled);
+                            let opencode_enabled = config
+                                .adapters
+                                .get("opencode")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(false);
+                            sync_opencode_integration(
+                                &handle,
+                                &opencode_sync_loop,
+                                opencode_enabled,
+                            );
                             let mut guard = snap_for_loop.lock().await;
                             if let Some(s) = guard.as_mut() {
                                 s.config = config;

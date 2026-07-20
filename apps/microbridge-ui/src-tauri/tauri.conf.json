@@ -78,7 +78,8 @@
       "../../../adapters/cursor/.cursor-plugin/plugin.json": "cursor-plugin/.cursor-plugin/plugin.json",
       "../../../adapters/cursor/hooks/hooks.json": "cursor-plugin/hooks/hooks.json",
       "../../../adapters/cursor/hooks/event.mjs": "cursor-plugin/hooks/event.mjs",
-      "../../../adapters/cursor/hooks/microbridge-event.mjs": "cursor-plugin/hooks/microbridge-event.mjs"
+      "../../../adapters/cursor/hooks/microbridge-event.mjs": "cursor-plugin/hooks/microbridge-event.mjs",
+      "../../../adapters/opencode/microbridge.mjs": "opencode-plugin/microbridge.mjs"
     },
     "icon": [
       "icons/32x32.png",

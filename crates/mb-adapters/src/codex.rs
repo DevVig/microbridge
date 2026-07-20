@@ -198,8 +198,8 @@ fn codex_app_label(originator: Option<&str>, cwd: Option<&str>) -> String {
         ("synara", "Synara"),
         ("conductor", "Conductor"),
         ("factory", "Factory"),
-        ("codex desktop", "Codex Desktop"),
-        ("codex_work_desktop", "Codex Desktop"),
+        ("codex desktop", "ChatGPT"),
+        ("codex_work_desktop", "ChatGPT"),
     ];
 
     if let Some(originator) = originator {
@@ -302,14 +302,8 @@ mod tests {
         assert_eq!(codex_app_label(Some("t3code_desktop"), None), "T3 Code");
         assert_eq!(codex_app_label(Some("factory_desktop"), None), "Factory");
         // The desktop app writes a display-cased originator.
-        assert_eq!(
-            codex_app_label(Some("Codex Desktop"), None),
-            "Codex Desktop"
-        );
-        assert_eq!(
-            codex_app_label(Some("codex_work_desktop"), None),
-            "Codex Desktop"
-        );
+        assert_eq!(codex_app_label(Some("Codex Desktop"), None), "ChatGPT");
+        assert_eq!(codex_app_label(Some("codex_work_desktop"), None), "ChatGPT");
 
         // Unknown host, no locating cwd → historical default rather than a
         // guess.

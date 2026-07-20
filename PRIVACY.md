@@ -22,16 +22,21 @@ no unconfigured network traffic.
 - No unconfigured network traffic; update checks and T3 access require opt-in
 - No uploading of session text or source code
 
-## Adapters
+## Integrations
 
-First-party adapters watch local session stores. The bundled Cursor integration
+First-party integrations watch local session stores. The bundled Cursor integration
 sends metadata-only lifecycle events over the local socket and never sends
 prompt, response, transcript, or tool argument content. The T3 Code adapter
 talks only to the exact environment the user pairs, using scoped orchestration
 access.
 
+The optional OpenCode plugin sends only the local session identifier, title,
+state, and update time over Microbridge's mode-`0600` Unix socket. It does not
+send prompts, responses, transcripts, source code, tool arguments, or files.
+Interrupt is executed inside OpenCode against the exact local session ID.
+
 The one-time T3 pairing token is exchanged immediately, never logged, and not
-stored. Removing the adapter deletes its Keychain credential.
+stored. Removing the integration deletes its Keychain credential.
 
 ## Hardware
 
