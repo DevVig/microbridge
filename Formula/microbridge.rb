@@ -68,15 +68,18 @@ class Microbridge < Formula
       source_app="#{opt_prefix}/Microbridge.app"
       apps_dir="${HOME}/Applications"
       dest="${apps_dir}/Microbridge.app"
-      marker="${dest}/.microbridge-brew"
+      marker="${apps_dir}/.Microbridge.app.microbridge-brew"
+      legacy_marker="${dest}/.microbridge-brew"
       /bin/mkdir -p "${apps_dir}"
-      if [ -e "${dest}" ] && [ ! -f "${marker}" ]; then
+      if [ -e "${dest}" ] && [ ! -f "${marker}" ] && [ ! -f "${legacy_marker}" ]; then
         echo "Microbridge: preserving unowned ${dest}" >&2
       else
         if [ -e "${dest}" ]; then
           /bin/rm -rf "${dest}"
         fi
         /usr/bin/ditto "${source_app}" "${dest}"
+        # Keep ownership state beside the signed bundle. Adding any file to
+        # Microbridge.app invalidates its sealed code signature.
         /usr/bin/touch "${marker}"
       fi
       exec "#{opt_bin}/microbridged"

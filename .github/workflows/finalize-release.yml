@@ -57,14 +57,21 @@ jobs:
           test "$(brew info --json=v2 DevVig/microbridge/microbridge | jq -r '.formulae[0].installed[0].version')" = "$VERSION"
           microbridgectl help | grep -q Usage
           APP="$HOME/Applications/Microbridge.app"
+          MARKER="$HOME/Applications/.Microbridge.app.microbridge-brew"
+          LEGACY_MARKER="$APP/.microbridge-brew"
           test -x "$(brew --prefix DevVig/microbridge/microbridge)/bin/microbridged"
           brew services start DevVig/microbridge/microbridge
           for _ in {1..30}; do
-            [[ -f "$APP/.microbridge-brew" ]] && break
+            [[ -f "$MARKER" ]] && break
             sleep 1
           done
-          test -f "$APP/.microbridge-brew"
+          test -f "$MARKER"
+          test ! -e "$LEGACY_MARKER"
           test "$(/usr/libexec/PlistBuddy -c 'Print:CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
+          codesign --verify --deep --strict --verbose=4 "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+          xcrun stapler validate "$APP"
+          syspolicy_check distribution "$APP"
           SERVICE_STATE=""
           for _ in {1..30}; do
             SERVICE_STATE="$(brew services list | awk '$1 == "microbridge" { print $2; exit }')"
@@ -92,9 +99,11 @@ jobs:
             echo "microbridge service is still registered after uninstall" >&2
             exit 1
           fi
-          test -f "$APP/.microbridge-brew"
+          test -f "$MARKER"
           rm -rf "$APP"
+          rm -f "$MARKER"
           test ! -e "$APP"
+          test ! -e "$MARKER"
 
   promote:
     name: promote verified release
