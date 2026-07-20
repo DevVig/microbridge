@@ -54,7 +54,7 @@ const KEY_SOURCES: {
   {
     id: "focused_app",
     label: "Focused app",
-    hint: "Owning app — newest threads (Claude, Codex, Cursor, Synara, T3, Conductor, Factory)",
+    hint: "Owning app — newest threads (Claude, Codex, CNVS, Cursor, Synara, T3, Conductor, Factory)",
   },
   {
     id: "most_recent",
@@ -580,13 +580,15 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Adapters</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Cursor and Factory ship inside Microbridge and install locally
-              with one click. Synara and Conductor are identified through the
-              built-in Codex and Claude journal watchers. State and capabilities
-              below are live.
+              CNVS connects automatically through its authenticated local control
+              API and targets exact canvas terminals. Cursor and Factory ship
+              inside Microbridge and install locally with one click. Synara and
+              Conductor are identified through the built-in Codex and Claude
+              journal watchers. State and capabilities below are live.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              T3-hosted threads are identified automatically. For controls, enable
+              CNVS-hosted Codex and Claude terminals replace matching raw journal
+              cards while CNVS owns them. T3-hosted threads are identified automatically. For controls, enable
               Network access in T3 Code Settings → Connections, create a link under
               Authorized clients, then paste it below. Factory hooks are merged
               without replacing your existing hooks.

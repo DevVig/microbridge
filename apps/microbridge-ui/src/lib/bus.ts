@@ -58,6 +58,7 @@ const DEMO: Snapshot = {
     adapters: {
       codex: { enabled: true },
       claude: { enabled: true },
+      cnvs: { enabled: true },
       cursor: { enabled: false },
       t3code: { enabled: false },
       factory: { enabled: false },
@@ -99,6 +100,22 @@ const DEMO: Snapshot = {
         reasoning_effort: false,
       },
       diagnostic: "Built-in lifecycle watcher is active.",
+    },
+    {
+      id: "cnvs",
+      display_name: "CNVS",
+      kind: "native",
+      state: "connected",
+      capabilities: {
+        lifecycle_observation: true,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: true,
+        new_session: false,
+        focus_open: true,
+        reasoning_effort: false,
+      },
+      diagnostic: "CNVS control is connected across exact canvas terminal targets.",
     },
     {
       id: "synara",

@@ -126,6 +126,19 @@ Factory's supported `~/.factory/hooks.json`; existing hooks are preserved.
 **Remove** deletes the Microbridge-owned hook entries and helper. Droid must be
 installed and signed in for interrupt and reasoning-effort controls.
 
+### CNVS integration
+
+CNVS support ships inside the daemon and is enabled by default. Start CNVS and
+Microbridge connects automatically to CNVS's authenticated loopback control
+API. Every running agent terminal is identified by its exact canvas and node,
+so an Agent Key can focus the correct workspace and terminal or interrupt that
+specific agent. There is no pairing code, plugin installation, or CNVS file
+modification.
+
+CNVS currently exposes lifecycle, focus, and interrupt controls through this
+contract. Microbridge leaves approval, new-session, and reasoning-effort
+controls disabled until CNVS exposes stable targets for them.
+
 Synara and Conductor do not need an installer: their Codex/Claude sessions are
 named by the built-in journal watchers. T3 Code controls require the one-time
 pairing flow shown in **Settings → Adapters**.
