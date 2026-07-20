@@ -12,7 +12,7 @@ const DEMO: Snapshot = {
   sessions: [
     {
       id: "s1",
-      app: "Codex",
+      app: "ChatGPT",
       title: "microbridge — HID reconnect on wake",
       state: "working",
       updated_at_ms: Date.now() - 12 * 60000,
@@ -62,6 +62,7 @@ const DEMO: Snapshot = {
       cursor: { enabled: false },
       t3code: { enabled: false },
       factory: { enabled: false },
+      opencode: { enabled: false },
     },
     hardware_control_enabled: false,
     brightness: 80,
@@ -100,6 +101,38 @@ const DEMO: Snapshot = {
         reasoning_effort: false,
       },
       diagnostic: "Built-in lifecycle watcher is active.",
+    },
+    {
+      id: "claude_desktop",
+      display_name: "Claude Desktop",
+      kind: "native",
+      state: "connected",
+      capabilities: {
+        lifecycle_observation: true,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Built-in Claude Desktop session attribution is ready.",
+    },
+    {
+      id: "chatgpt",
+      display_name: "ChatGPT",
+      kind: "native",
+      state: "connected",
+      capabilities: {
+        lifecycle_observation: true,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Built-in ChatGPT Codex-session attribution is ready.",
     },
     {
       id: "cnvs",
@@ -197,6 +230,22 @@ const DEMO: Snapshot = {
       },
       diagnostic: "Disabled until you explicitly enable this integration.",
     },
+    {
+      id: "opencode",
+      display_name: "OpenCode",
+      kind: "community",
+      state: "disabled",
+      capabilities: {
+        lifecycle_observation: false,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Disabled until you explicitly enable this integration.",
+    },
   ],
 };
 
@@ -266,7 +315,7 @@ export async function setConfig(config: DaemonConfig): Promise<DaemonConfig> {
 
 export async function setAdapterEnabled(adapterId: string, enabled: boolean): Promise<string> {
   const message = await invokeTauri<string>("set_adapter_enabled", { adapterId, enabled });
-  if (message === null) throw new Error("Adapter controls require the Microbridge app.");
+  if (message === null) throw new Error("Integration controls require the Microbridge app.");
   return message;
 }
 
@@ -278,7 +327,7 @@ export async function pairAdapter(adapterId: string, pairingUrl: string): Promis
 
 export async function forgetAdapter(adapterId: string): Promise<string> {
   const message = await invokeTauri<string>("forget_adapter", { adapterId });
-  if (message === null) throw new Error("Adapter controls require the Microbridge app.");
+  if (message === null) throw new Error("Integration controls require the Microbridge app.");
   return message;
 }
 

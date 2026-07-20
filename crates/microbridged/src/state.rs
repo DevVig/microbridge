@@ -803,6 +803,10 @@ fn setup_diagnostic(adapter_id: &str) -> String {
         }
         "t3code" => "Paste a one-time pairing link from T3 Code Settings → Connections.".into(),
         "factory" => "Enable the bundled Factory lifecycle hooks to connect Droid sessions.".into(),
+        "opencode" => {
+            "The bundled OpenCode integration is installed. Restart OpenCode once if it is already running."
+                .into()
+        }
         "cnvs" => {
             "Open CNVS; Microbridge connects to its authenticated local control API automatically."
                 .into()
@@ -816,6 +820,7 @@ fn reconnect_diagnostic(adapter_id: &str) -> String {
         "cursor" => "Cursor is enabled, but no lifecycle event has arrived yet. Reload Cursor if it was already open.".into(),
         "t3code" => "T3 Code is enabled, but its paired connection is offline.".into(),
         "factory" => "Factory is enabled, but no Droid lifecycle event has arrived yet.".into(),
+        "opencode" => "OpenCode is enabled, but its integration has not connected yet. Restart OpenCode if it was already running.".into(),
         "cnvs" => "CNVS is enabled and will reconnect automatically when the app is running.".into(),
         _ => "Adapter is offline.".into(),
     }
@@ -870,13 +875,19 @@ fn initial_adapter_statuses(config: &DaemonConfig) -> BTreeMap<String, AdapterSt
     };
     BTreeMap::from([
         ("claude".into(), native("claude", "Claude Code")),
+        (
+            "claude_desktop".into(),
+            native("claude_desktop", "Claude Desktop"),
+        ),
         ("codex".into(), native("codex", "Codex CLI")),
+        ("chatgpt".into(), native("chatgpt", "ChatGPT")),
         ("synara".into(), native("synara", "Synara")),
         ("conductor".into(), native("conductor", "Conductor")),
         ("cnvs".into(), native("cnvs", "CNVS")),
         ("cursor".into(), opt_in("cursor", "Cursor")),
         ("t3code".into(), opt_in("t3code", "T3 Code")),
         ("factory".into(), opt_in("factory", "Factory")),
+        ("opencode".into(), opt_in("opencode", "OpenCode")),
     ])
 }
 

@@ -21,7 +21,7 @@ type SettingsTab =
   | "general"
   | "keys"
   | "agent"
-  | "adapters"
+  | "integrations"
   | "device"
   | "updates";
 

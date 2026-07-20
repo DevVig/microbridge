@@ -102,7 +102,7 @@ right-click the menu bar icon → **Check for Updates…**, or turn on *Settings
 Updates → check automatically at launch* (off by default). The app downloads
 the signed update, verifies it, and relaunches. Update checks are the only
 app-originated network call. The daemon also contacts a T3 Code environment
-only after you explicitly enable that adapter and exchange a one-time pairing
+only after you explicitly enable that integration and exchange a one-time pairing
 link; Microbridge has no telemetry or cloud relay.
 
 Homebrew installs are managed by brew instead: the app detects the brew
@@ -111,7 +111,7 @@ so the formula version and the on-disk app never drift apart.
 
 ### Cursor integration
 
-Cursor support ships inside Microbridge. Open **Settings → Adapters** and click
+Cursor support ships inside Microbridge. Open **Settings → Integrations** and click
 **Enable Cursor**; Microbridge installs its bundled lifecycle integration into
 Cursor's supported local-plugin directory after that explicit consent. Reload
 Cursor once if it is already open. **Remove** disables the adapter and removes
@@ -119,7 +119,7 @@ only Microbridge's local integration. No Marketplace download is required.
 
 ### Factory integration
 
-Factory support ships inside Microbridge. Open **Settings → Adapters** and
+Factory support ships inside Microbridge. Open **Settings → Integrations** and
 click **Enable Factory**. Microbridge copies its signed `microbridgectl` helper
 to `~/.microbridge/integrations/factory/` and merges only its own entries into
 Factory's supported `~/.factory/hooks.json`; existing hooks are preserved.
@@ -140,8 +140,18 @@ contract. Microbridge leaves approval, new-session, and reasoning-effort
 controls disabled until CNVS exposes stable targets for them.
 
 Synara and Conductor do not need an installer: their Codex/Claude sessions are
-named by the built-in journal watchers. T3 Code controls require the one-time
-pairing flow shown in **Settings → Adapters**.
+named by the built-in journal watchers. ChatGPT, Claude Desktop, Codex CLI, and
+Claude Code are distinguished automatically by those same watchers. T3 Code
+controls require the one-time pairing flow shown in **Settings → Integrations**.
+
+### OpenCode integration
+
+OpenCode support ships inside Microbridge. Open **Settings → Integrations** and
+click **Enable OpenCode**. Microbridge installs its dependency-free global plugin
+at `~/.config/opencode/plugins/microbridge.mjs`. Restart OpenCode if it is already
+running. The plugin publishes local lifecycle state and routes Interrupt to the
+exact OpenCode session; it does not read or send prompts, transcripts, source
+code, or tool arguments. **Remove** deletes only the Microbridge-owned file.
 
 **Note:** Homebrew installs **prebuilt** release binaries (not a from-source
 Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
@@ -160,6 +170,7 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | `~/.cursor/plugins/local/microbridge` | Bundled Cursor lifecycle integration (only after consent) |
 | `~/.factory/hooks.json` | Existing Factory hooks plus Microbridge-owned lifecycle entries (only after consent) |
 | `~/.microbridge/integrations/factory/microbridgectl` | Signed Factory hook helper (only after consent) |
+| `~/.config/opencode/plugins/microbridge.mjs` | Bundled OpenCode lifecycle and interrupt integration (only after consent) |
 | `~/Library/LaunchAgents/ai.microbridge.ui.plist` | Login item (only if you enable launch at login) |
 
 ## Launch at login

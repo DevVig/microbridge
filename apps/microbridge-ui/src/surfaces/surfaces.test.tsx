@@ -37,6 +37,7 @@ function snapshot(sessions: SessionStatus[] = []): Snapshot {
         cursor: { enabled: true },
         t3code: { enabled: false },
         factory: { enabled: false },
+        opencode: { enabled: false },
       },
       hardware_control_enabled: false,
       brightness: 80,
@@ -101,25 +102,27 @@ describe("Settings", () => {
     expect(html).toContain("Reset to Codex Defaults");
   });
 
-  it("renders daemon adapter state and capability limits", () => {
+  it("renders unified integration state and capability limits", () => {
     const html = renderToStaticMarkup(
       <Settings
         snapshot={snapshot()}
         dark
-        tab="adapters"
+        tab="integrations"
         onTab={noop}
         onConfig={noop}
         onClose={noop}
       />,
     );
-    expect(html).toContain("limited");
+    expect(html).toContain("Limited");
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
-    expect(html).toContain("CNVS connects automatically");
+    expect(html).toContain("Integrations");
+    expect(html).toContain("Connected · 1");
+    expect(html).toContain("Not connected · 1");
     expect(html).toContain("Connected across 3 exact canvas terminal targets");
     expect(html).toContain("✓ Open");
     expect(html).toContain("Interrupt");
-    expect(html).toContain("Cursor and Factory ship");
+    expect(html).toContain("OpenCode uses its official global plugin");
     expect(html).toContain("Repair bundled integration");
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");

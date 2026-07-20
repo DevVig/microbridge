@@ -5,7 +5,7 @@ its host contract and replaces the former idle Node scaffold.
 
 ## Pairing
 
-1. Enable T3 Code in **Microbridge Settings → Adapters**.
+1. Enable T3 Code in **Microbridge Settings → Integrations**.
 2. In T3 Code, open **Settings → Connections**, enable **Network access**, then
    create a one-time link under **Authorized clients**.
 3. Paste the link into Microbridge. The one-time token is exchanged immediately.

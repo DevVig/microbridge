@@ -7,7 +7,7 @@ actions (approve / reject / interrupt) stay on the physical Codex Micro.
 |---|---|
 | Menu bar icon | Template tray icon; click toggles the popover |
 | Popover | Connection, focus card, device echo, threads, Settings / Pause LEDs / Quit |
-| Settings | Keys (device twin) · Agent Keys · Adapters · Device |
+| Settings | Keys (device twin) · Agent Keys · Integrations · Device · Updates |
 | Focus HUD | ~2.5s toast when deck focus changes |
 
 MagicPath mockups remain the visual go-to (`vendor/magicpath/`).

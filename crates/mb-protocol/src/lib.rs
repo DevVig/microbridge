@@ -290,6 +290,7 @@ pub fn default_adapter_preferences() -> BTreeMap<String, AdapterPreference> {
         ("cursor".into(), AdapterPreference { enabled: false }),
         ("t3code".into(), AdapterPreference { enabled: false }),
         ("factory".into(), AdapterPreference { enabled: false }),
+        ("opencode".into(), AdapterPreference { enabled: false }),
     ])
 }
 
@@ -321,7 +322,8 @@ pub struct DaemonConfig {
     pub lighting_preset: LightingPreset,
     #[serde(default)]
     pub state_colors: StateColors,
-    /// Per-host consent. Cursor, T3 Code, and Factory are disabled until explicitly enabled.
+    /// Per-host consent. Cursor, T3 Code, Factory, and OpenCode are disabled
+    /// until explicitly enabled.
     #[serde(default = "default_adapter_preferences")]
     pub adapters: BTreeMap<String, AdapterPreference>,
     /// Claim and poll the physical HID interface. Off unless explicitly enabled.

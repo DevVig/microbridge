@@ -7,7 +7,7 @@ replacement sessions.
 
 ## Install and consent
 
-1. Open **Microbridge Settings → Adapters**.
+1. Open **Microbridge Settings → Integrations**.
 2. Click **Enable Cursor**. Microbridge installs its bundled integration into
    Cursor's supported local-plugin directory after this explicit consent.
 3. Reload Cursor once if it is already open. **Remove** disables the adapter

@@ -5,13 +5,14 @@
 | Component | Runs as | Language | Required? |
 |---|---|---|---|
 | `microbridged` | resident daemon (launchd agent) | Rust | yes |
-| First-party integrations (Codex CLI, Claude Code, CNVS, Synara/Conductor attribution) | in-process modules of the daemon | Rust | bundled |
-| Community adapters | separate processes on the socket | any | optional |
+| First-party integrations (ChatGPT, Claude Desktop, Codex CLI, Claude Code, CNVS, Synara/Conductor attribution) | in-process modules of the daemon | Rust | bundled |
+| Managed integrations (OpenCode, Cursor, Factory, T3 Code) | host plugins/hooks or socket clients | Rust/Node | opt-in |
+| Community integrations | separate processes on the socket | any | optional |
 | Menu bar app | primary UI (tray + settings + focus HUD) | Tauri 2 + React (`apps/microbridge-ui`) | yes (default install) |
 
 The daemon owns three things: the **status bus** (session registry fed by
 adapters), the **focus policy** (which session owns the deck), and the
-**device layer** (LED frames out, key events in). Adapters never touch the
+**device layer** (LED frames out, key events in). Integrations never touch the
 device — see [protocol.md](protocol.md).
 
 ## Footprint budget
@@ -27,13 +28,14 @@ line; regressions are release blockers.
 | Device traffic | bytes per state *transition* | LED frames written only when resolved state changes; a 32–64 byte HID report each |
 | Disk | config file + log (rotated) | logs at `info` are transition-only |
 
-First-party adapters are compiled into the daemon precisely to protect this
+First-party integrations are compiled into the daemon precisely to protect this
 budget: watching `~/.codex/sessions` or Claude Code hooks is file watching.
 The paired T3 adapter uses a bounded refresh with exponential backoff because
 the supported HTTP contract is snapshot-based. Cursor and Factory use one-shot
 managed hooks and leave no resident helper process. Factory starts Droid
 JSON-RPC only for an interrupt or reasoning-effort action and exits afterward.
-CNVS exposes snapshot state, so its in-process integration uses an adaptive
+OpenCode uses its official event plugin and creates no polling loop; reconnects
+to the local daemon use bounded backoff. CNVS exposes snapshot state, so its in-process integration uses an adaptive
 local-only refresh and publishes only changed sessions. It rereads CNVS's
 endpoint descriptor for each scan or action, never persists its token, and
 rejects endpoints that are not loopback addresses.
@@ -51,7 +53,7 @@ The deck shows exactly one session at a time:
    not polled).
 4. **Fallback.** With no other signal, the most recently updated session wins.
 
-Adapters never seize the hardware. Commands route only to the focused session's
+Integrations never seize the hardware. Commands route only to the focused session's
 owner and only when that owner advertised the required capability.
 
 ## Platform support

@@ -131,7 +131,8 @@ Keyboard setup. Four sections in a left rail:
 - **Agent Keys** — live "six keys, six threads" view, key source, deck focus
   mode (auto/pinned), app priority order, approvals-interrupt toggle (policy
   only — no live approve UI)
-- **Adapters** — native vs community badges, enable toggles, footprint
+- **Integrations** — one complete catalog grouped by connected and not connected,
+  with enable, repair, disconnect, and remove actions only where applicable
 - **Device** — Appearance (System/Light/Dark), Lighting (Codex defaults +
   Phosphor preset + reset), brightness, LED test, sleep timer (default 3 min),
   firmware, zero-network note

@@ -39,6 +39,12 @@ pub fn app_family(name: &str) -> String {
     if lower == "cnvs" || lower.starts_with("cnvs ") {
         return "cnvs".into();
     }
+    if lower == "opencode" || lower.starts_with("opencode ") {
+        return "opencode".into();
+    }
+    if is_chatgpt(&lower) {
+        return "chatgpt".into();
+    }
     if is_codex(&lower) {
         return "codex".into();
     }
@@ -60,7 +66,9 @@ fn canonical_family(name: &str) -> Option<&'static str> {
         "Conductor" => Some("conductor"),
         "Factory" => Some("factory"),
         "CNVS" => Some("cnvs"),
+        "OpenCode" => Some("opencode"),
         "Codex CLI" => Some("codex"),
+        "ChatGPT" | "Codex Desktop" => Some("chatgpt"),
         "Claude Code" => Some("claude_code"),
         "Claude Desktop" => Some("claude_desktop"),
         _ => None,
@@ -85,8 +93,14 @@ fn is_t3(lower: &str) -> bool {
         || lower.starts_with("t3 chat")
 }
 
+fn is_chatgpt(lower: &str) -> bool {
+    matches!(lower, "chatgpt" | "codex app" | "codex desktop")
+        || lower.starts_with("chatgpt ")
+        || lower.starts_with("codex desktop")
+}
+
 fn is_codex(lower: &str) -> bool {
-    matches!(lower, "codex" | "codex cli" | "codex app" | "chatgpt") || lower.starts_with("codex ")
+    matches!(lower, "codex" | "codex cli") || lower.starts_with("codex cli")
 }
 
 /// Frontmost often reports bare `"Claude"` while sessions are `"Claude Code"`.
@@ -119,12 +133,15 @@ mod tests {
         assert!(same_app("Conductor", "Conductor"));
         assert!(same_app("Factory", "Factory"));
         assert!(same_app("CNVS", "CNVS"));
+        assert!(same_app("OpenCode", "OpenCode (Dev)"));
     }
 
     #[test]
     fn codex_cli_matches_codex_frontmost() {
         assert!(same_app("Codex", "Codex CLI"));
         assert!(same_app("Codex CLI", "Codex CLI"));
+        assert!(!same_app("ChatGPT", "Codex CLI"));
+        assert!(same_app("Codex Desktop", "ChatGPT"));
     }
 
     #[test]

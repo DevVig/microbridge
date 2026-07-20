@@ -46,6 +46,30 @@ const CAPABILITIES: { id: keyof AdapterCapabilities; label: string }[] = [
   { id: "reasoning_effort", label: "Effort" },
 ];
 
+const INTEGRATION_ORDER = [
+  "chatgpt",
+  "claude_desktop",
+  "claude",
+  "codex",
+  "cnvs",
+  "synara",
+  "conductor",
+  "cursor",
+  "t3code",
+  "factory",
+  "opencode",
+];
+
+const INTEGRATION_STATE_LABELS = {
+  disabled: "Not connected",
+  needs_setup: "Waiting",
+  connecting: "Connecting",
+  connected: "Connected",
+  limited: "Limited",
+  incompatible: "Incompatible",
+  error: "Error",
+} as const;
+
 const KEY_SOURCES: {
   id: DaemonConfig["key_source"];
   label: string;
@@ -54,7 +78,7 @@ const KEY_SOURCES: {
   {
     id: "focused_app",
     label: "Focused app",
-    hint: "Owning app — newest threads (Claude, Codex, CNVS, Cursor, Synara, T3, Conductor, Factory)",
+    hint: "Owning app — newest threads (ChatGPT, Claude, Codex, CNVS, Cursor, Synara, T3, Conductor, Factory, OpenCode)",
   },
   {
     id: "most_recent",
@@ -78,7 +102,7 @@ const KEY_SOURCES: {
   },
 ];
 
-type Tab = "general" | "keys" | "agent" | "adapters" | "device" | "updates";
+type Tab = "general" | "keys" | "agent" | "integrations" | "device" | "updates";
 
 export function Settings({
   snapshot,
@@ -155,7 +179,7 @@ export function Settings({
     { id: "general", label: "General" },
     { id: "keys", label: "Keys" },
     { id: "agent", label: "Agent Keys" },
-    { id: "adapters", label: "Adapters" },
+    { id: "integrations", label: "Integrations" },
     { id: "device", label: "Device" },
     { id: "updates", label: "Updates" },
   ];
@@ -251,7 +275,7 @@ export function Settings({
               >
                 Click a control on the twin to inspect it. Agent Keys show the
                 live thread; commands route only when hardware control is enabled
-                and the focused adapter advertises the action.
+                and the focused integration advertises the action.
               </p>
               <div className="mt-5 flex justify-center lg:justify-start">
                 <DeviceTwin
@@ -576,19 +600,19 @@ export function Settings({
           </section>
         )}
 
-        {tab === "adapters" && (
+        {tab === "integrations" && (
           <section>
-            <h1 className="text-[18px] font-semibold">Adapters</h1>
+            <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              CNVS connects automatically through its authenticated local control
-              API and targets exact canvas terminals. Cursor and Factory ship
-              inside Microbridge and install locally with one click. Synara and
-              Conductor are identified through the built-in Codex and Claude
-              journal watchers. State and capabilities below are live.
+              Every supported app is listed here. Green integrations are ready;
+              everything else shows exactly what it needs. ChatGPT, Claude
+              Desktop, Synara, Conductor, and CNVS are built in. Cursor, Factory,
+              T3 Code, and OpenCode connect only after you choose to enable them.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
               CNVS-hosted Codex and Claude terminals replace matching raw journal
-              cards while CNVS owns them. T3-hosted threads are identified automatically. For controls, enable
+              cards while CNVS owns them. OpenCode uses its official global plugin
+              API for lifecycle and interrupt. T3-hosted threads are identified automatically. For controls, enable
               Network access in T3 Code Settings → Connections, create a link under
               Authorized clients, then paste it below. Factory hooks are merged
               without replacing your existing hooks.
@@ -598,8 +622,27 @@ export function Settings({
                 {adapterMessage}
               </p>
             )}
-            <ul className="mt-4 space-y-3">
-              {snapshot.adapters.map((adapter) => (
+            {[
+              {
+                label: "Connected",
+                connected: true,
+                integrations: snapshot.adapters.filter((item) => item.state === "connected"),
+              },
+              {
+                label: "Not connected",
+                connected: false,
+                integrations: snapshot.adapters.filter((item) => item.state !== "connected"),
+              },
+            ].map((group) => (
+              <div className="mt-5" key={group.label}>
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: t.textSecondary }}>
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.connected ? "#30C463" : t.textMuted }} />
+                  {group.label} · {group.integrations.length}
+                </div>
+                <ul className="mt-2 space-y-3">
+              {[...group.integrations]
+                .sort((left, right) => INTEGRATION_ORDER.indexOf(left.id) - INTEGRATION_ORDER.indexOf(right.id))
+                .map((adapter) => (
                 <li
                   key={adapter.id}
                   className="rounded-xl px-3 py-3"
@@ -612,12 +655,6 @@ export function Settings({
                     <div>
                       <div className="flex items-center gap-2 text-[12.5px] font-medium">
                         {adapter.display_name}
-                        <span
-                          className="rounded-full px-2 py-0.5 text-[9.5px] capitalize"
-                          style={{ backgroundColor: t.hoverBg, color: t.textSecondary }}
-                        >
-                          {adapter.kind}
-                        </span>
                       </div>
                     <div
                       className="mt-1 text-[11px]"
@@ -635,7 +672,7 @@ export function Settings({
                           adapter.state === "connected" ? "#30A653" : adapter.state === "error" ? "#D93A32" : t.textSecondary,
                       }}
                     >
-                      {adapter.state.replace("_", " ")}
+                      {INTEGRATION_STATE_LABELS[adapter.state]}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -694,12 +731,14 @@ export function Settings({
                           ? "Enable Cursor"
                           : adapter.id === "factory"
                             ? "Enable Factory"
+                            : adapter.id === "opencode"
+                              ? "Enable OpenCode"
                             : "Enable integration"}
                       </button>
                     )}
                     {adapter.kind === "community" && cfg.adapters[adapter.id]?.enabled && (
                       <>
-                        {(adapter.id === "cursor" || adapter.id === "factory") && (
+                        {(adapter.id === "cursor" || adapter.id === "factory" || adapter.id === "opencode") && (
                           <button
                             type="button"
                             disabled={adapterBusy.has(adapter.id)}
@@ -739,7 +778,9 @@ export function Settings({
                   </div>
                 </li>
               ))}
-            </ul>
+                </ul>
+              </div>
+            ))}
           </section>
         )}
 
@@ -748,7 +789,7 @@ export function Settings({
             <h1 className="text-[18px] font-semibold">Updates</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
               Update checks run only when requested or explicitly enabled. A
-              paired T3 Code adapter contacts only its approved environment.
+              paired T3 Code integration contacts only its approved environment.
             </p>
 
             <div
