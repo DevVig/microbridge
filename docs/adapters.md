@@ -58,3 +58,17 @@ host-managed so each host owns hook execution and Microbridge owns only the
 entries it installs. CNVS is daemon-owned because its canvas/node identity and
 short-lived local token must remain inside the same routing boundary. Synara
 and Conductor reuse the built-in journal watchers.
+
+## Hosts vs adapters (Settings → Integrations)
+
+**Adapters / session sources** publish or watch state (Claude Code, Codex CLI,
+CNVS, Cursor, T3 Code, Factory, OpenCode). They may have Enable / Pair /
+Disconnect actions.
+
+**Host-attributed apps** (Synara, ChatGPT, Claude Desktop, Conductor) are not
+separate pairable adapters. They share `~/.claude/projects` and
+`~/.codex/sessions`; the built-in watchers label sessions by `entrypoint` /
+`originator` / cwd. Settings still shows each as its own Integrations card with
+a green / yellow / red status derived from live threads — do **not** open a PR
+that adds a Synara (or ChatGPT) pairing adapter unless the host publishes a
+distinct control API.
