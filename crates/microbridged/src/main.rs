@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, AdapterEvent};
 use mb_device::open_default_device_with_claim;
+use microbridged::cnvs::{self, CNVS_OWNER};
 use microbridged::config::load_config;
 use microbridged::factory::{self, FACTORY_OWNER};
 use microbridged::frontmost::spawn_frontmost_watcher;
@@ -36,6 +37,7 @@ async fn main() -> std::io::Result<()> {
 
     let (t3_action_tx, t3_action_rx) = mpsc::unbounded_channel();
     let (factory_action_tx, factory_action_rx) = mpsc::unbounded_channel();
+    let (cnvs_action_tx, cnvs_action_rx) = mpsc::unbounded_channel();
     let mut daemon_state = DaemonState::new(device, config);
     daemon_state.install_internal_adapter(T3_OWNER, "t3code", t3code::capabilities(), t3_action_tx);
     daemon_state.install_internal_adapter(
@@ -44,9 +46,11 @@ async fn main() -> std::io::Result<()> {
         factory::capabilities(),
         factory_action_tx,
     );
+    daemon_state.install_internal_adapter(CNVS_OWNER, "cnvs", cnvs::capabilities(), cnvs_action_tx);
     let shared = Arc::new(Mutex::new(daemon_state));
     t3code::spawn(Arc::clone(&shared), t3_action_rx);
     factory::spawn(Arc::clone(&shared), factory_action_rx);
+    cnvs::spawn(Arc::clone(&shared), cnvs_action_rx);
 
     // Hardware notifications are non-blocking. This small bounded drain also
     // expires lease-backed IDE hook sessions without introducing network polling.
@@ -71,13 +75,13 @@ async fn main() -> std::io::Result<()> {
             let mut state = bus.lock().await;
             match event {
                 // conn_id 0 = in-process owner
-                AdapterEvent::Upsert(session) => {
-                    let adapter_id = session.id.split(':').next().unwrap_or_default();
+                AdapterEvent::Upsert(observed) => {
+                    let adapter_id = observed.session.id.split(':').next().unwrap_or_default();
                     if state.adapter_enabled(adapter_id) {
-                        state.upsert_session(session, 0);
+                        state.upsert_observed_session(observed, 0);
                     }
                 }
-                AdapterEvent::Remove(id) => state.remove_session(&id),
+                AdapterEvent::Remove(id) => state.remove_observed_session(&id),
             }
         }
     });

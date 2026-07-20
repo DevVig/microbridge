@@ -1,10 +1,11 @@
 //! Shared daemon state: registry, config, device, subscribers.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use mb_adapters::{ObservedSession, SessionContext};
 use mb_device::{parse_rgb_hex, Device, LedFrame};
 use mb_protocol::{
     Action, AdapterCapabilities, AdapterConnectionState, AdapterKind, AdapterStatus, AgentKeyLed,
@@ -40,6 +41,11 @@ pub struct DaemonState {
     pub adapters: BTreeMap<String, AdapterStatus>,
     /// One-shot hook sessions survive their short socket connection until this deadline.
     leased_sessions: HashMap<String, Instant>,
+    /// Journal observations remain cached while a native host such as CNVS
+    /// claims the same runtime + working directory. This makes the host card
+    /// authoritative without losing the raw session when the host closes.
+    observed_sessions: HashMap<String, ObservedSession>,
+    hosted_claims: HashMap<u64, HashSet<SessionContext>>,
     last_agent_key_press: [Option<Instant>; AGENT_KEY_COUNT],
     last_leds: LedFrame,
 }
@@ -58,6 +64,8 @@ impl DaemonState {
             adapter_capabilities: HashMap::new(),
             adapters,
             leased_sessions: HashMap::new(),
+            observed_sessions: HashMap::new(),
+            hosted_claims: HashMap::new(),
             last_agent_key_press: [None; AGENT_KEY_COUNT],
             last_leds: LedFrame::default(),
         }
@@ -99,6 +107,119 @@ impl DaemonState {
             session: session.clone(),
         });
         self.after_bus_change(prev_focus);
+    }
+
+    pub fn upsert_observed_session(&mut self, mut observed: ObservedSession, owner: u64) {
+        if let Some(context) = observed.context.as_mut() {
+            context.cwd = normalize_cwd(&context.cwd);
+        }
+        let id = observed.session.id.clone();
+        self.observed_sessions.insert(id.clone(), observed.clone());
+        if self.observation_is_hosted(&observed) {
+            if self.registry.sessions.contains_key(&id) {
+                self.remove_session(&id);
+            }
+        } else if self.registry.sessions.get(&id) != Some(&observed.session)
+            || self.registry.owner_of(&id) != Some(owner)
+        {
+            self.upsert_session(observed.session, owner);
+        }
+    }
+
+    pub fn remove_observed_session(&mut self, id: &str) {
+        self.observed_sessions.remove(id);
+        self.remove_session(id);
+    }
+
+    /// Replace one native host's full terminal snapshot atomically. CNVS node
+    /// ids are the user-facing sessions; matching raw Codex/Claude journals
+    /// stay cached and return if the host terminal disappears.
+    pub fn replace_hosted_sessions(
+        &mut self,
+        owner: u64,
+        sessions: Vec<(SessionStatus, SessionContext)>,
+    ) {
+        let claims = sessions
+            .iter()
+            .map(|(_, context)| SessionContext {
+                runtime: context.runtime.clone(),
+                cwd: normalize_cwd(&context.cwd),
+            })
+            .collect::<HashSet<_>>();
+        self.hosted_claims.insert(owner, claims);
+
+        let next_ids = sessions
+            .iter()
+            .map(|(session, _)| session.id.clone())
+            .collect::<HashSet<_>>();
+        let removed = self
+            .registry
+            .owners
+            .iter()
+            .filter_map(|(id, session_owner)| {
+                (*session_owner == owner && !next_ids.contains(id)).then_some(id.clone())
+            })
+            .collect::<Vec<_>>();
+        for id in removed {
+            self.remove_session(&id);
+        }
+
+        for (mut session, _) in sessions {
+            if let Some(existing) = self.registry.sessions.get(&session.id) {
+                if existing.app == session.app
+                    && existing.title == session.title
+                    && existing.state == session.state
+                {
+                    session.updated_at_ms = existing.updated_at_ms;
+                }
+            }
+            if self.registry.sessions.get(&session.id) != Some(&session)
+                || self.registry.owner_of(&session.id) != Some(owner)
+            {
+                self.upsert_session(session, owner);
+            }
+        }
+        self.reconcile_observed_sessions();
+    }
+
+    fn observation_is_hosted(&self, observed: &ObservedSession) -> bool {
+        let Some(context) = observed.context.as_ref() else {
+            return false;
+        };
+        if !matches!(context.runtime.as_str(), "codex" | "claude") {
+            return false;
+        }
+        // A stable host attribution from another app must never be hidden just
+        // because that app happens to use the same runtime and working tree.
+        if !matches!(
+            observed.session.app.as_str(),
+            "Codex CLI" | "Claude Code" | "Claude Agent SDK" | "CNVS"
+        ) {
+            return false;
+        }
+        let normalized = SessionContext {
+            runtime: context.runtime.clone(),
+            cwd: normalize_cwd(&context.cwd),
+        };
+        self.hosted_claims
+            .values()
+            .any(|claims| claims.contains(&normalized))
+    }
+
+    fn reconcile_observed_sessions(&mut self) {
+        let observations = self.observed_sessions.values().cloned().collect::<Vec<_>>();
+        for observed in observations {
+            let id = observed.session.id.clone();
+            if self.observation_is_hosted(&observed) {
+                if self.registry.sessions.contains_key(&id) {
+                    self.remove_session(&id);
+                }
+            } else if self.registry.sessions.get(&id) != Some(&observed.session)
+                || self.registry.owner_of(&id) != Some(0)
+            {
+                self.upsert_session(observed.session, 0);
+            }
+        }
     }
 
     pub fn remove_session(&mut self, session_id: &str) {
@@ -404,6 +525,8 @@ impl DaemonState {
             self.registry.remove(&id, &self.config);
             self.broadcast_ui(BusEvent::SessionRemoved { session_id: id });
         }
+        self.hosted_claims.remove(&owner);
+        self.reconcile_observed_sessions();
         self.after_bus_change(previous);
     }
 
@@ -663,6 +786,15 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn normalize_cwd(cwd: &str) -> String {
+    let trimmed = cwd.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/".into()
+    } else {
+        trimmed.into()
+    }
+}
+
 fn setup_diagnostic(adapter_id: &str) -> String {
     match adapter_id {
         "cursor" => {
@@ -671,6 +803,10 @@ fn setup_diagnostic(adapter_id: &str) -> String {
         }
         "t3code" => "Paste a one-time pairing link from T3 Code Settings → Connections.".into(),
         "factory" => "Enable the bundled Factory lifecycle hooks to connect Droid sessions.".into(),
+        "cnvs" => {
+            "Open CNVS; Microbridge connects to its authenticated local control API automatically."
+                .into()
+        }
         _ => "Waiting for the adapter to connect.".into(),
     }
 }
@@ -680,6 +816,7 @@ fn reconnect_diagnostic(adapter_id: &str) -> String {
         "cursor" => "Cursor is enabled, but no lifecycle event has arrived yet. Reload Cursor if it was already open.".into(),
         "t3code" => "T3 Code is enabled, but its paired connection is offline.".into(),
         "factory" => "Factory is enabled, but no Droid lifecycle event has arrived yet.".into(),
+        "cnvs" => "CNVS is enabled and will reconnect automatically when the app is running.".into(),
         _ => "Adapter is offline.".into(),
     }
 }
@@ -736,6 +873,7 @@ fn initial_adapter_statuses(config: &DaemonConfig) -> BTreeMap<String, AdapterSt
         ("codex".into(), native("codex", "Codex CLI")),
         ("synara".into(), native("synara", "Synara")),
         ("conductor".into(), native("conductor", "Conductor")),
+        ("cnvs".into(), native("cnvs", "CNVS")),
         ("cursor".into(), opt_in("cursor", "Cursor")),
         ("t3code".into(), opt_in("t3code", "T3 Code")),
         ("factory".into(), opt_in("factory", "Factory")),
@@ -764,6 +902,9 @@ fn color_for_state(config: &DaemonConfig, state: AgentState) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mb_adapters::{ObservedSession, SessionContext};
+
+    const CNVS_OWNER_FOR_TEST: u64 = u64::MAX - 3;
     use mb_device::MockDevice;
 
     fn session(id: &str, state: AgentState) -> SessionStatus {
@@ -778,6 +919,82 @@ mod tests {
 
     fn state() -> DaemonState {
         DaemonState::new(Box::<MockDevice>::default(), DaemonConfig::default())
+    }
+
+    #[test]
+    fn hosted_terminal_replaces_and_then_restores_raw_journal() {
+        let mut state = state();
+        let context = SessionContext {
+            runtime: "codex".into(),
+            cwd: "/Users/me/dev/project/".into(),
+        };
+        let raw = SessionStatus {
+            id: "codex:thread-1".into(),
+            app: "Codex CLI".into(),
+            title: "Repair checkout".into(),
+            state: AgentState::Working,
+            updated_at_ms: 1,
+        };
+        state.upsert_observed_session(
+            ObservedSession {
+                session: raw.clone(),
+                context: Some(context.clone()),
+            },
+            0,
+        );
+        assert!(state.registry.sessions.contains_key(&raw.id));
+
+        let hosted = SessionStatus {
+            id: "cnvs:canvas-1:node-1".into(),
+            app: "CNVS".into(),
+            title: "Project · Repair checkout · Codex".into(),
+            state: AgentState::Working,
+            updated_at_ms: 2,
+        };
+        state.replace_hosted_sessions(CNVS_OWNER_FOR_TEST, vec![(hosted.clone(), context)]);
+        assert!(!state.registry.sessions.contains_key(&raw.id));
+        assert!(state.registry.sessions.contains_key(&hosted.id));
+
+        state.replace_hosted_sessions(CNVS_OWNER_FOR_TEST, Vec::new());
+        assert!(state.registry.sessions.contains_key(&raw.id));
+        assert!(!state.registry.sessions.contains_key(&hosted.id));
+    }
+
+    #[test]
+    fn hosted_terminal_does_not_hide_a_different_attributed_host() {
+        let mut state = state();
+        let context = SessionContext {
+            runtime: "codex".into(),
+            cwd: "/Users/me/dev/project".into(),
+        };
+        let synara = SessionStatus {
+            id: "codex:synara-thread".into(),
+            app: "Synara".into(),
+            title: "Independent Synara thread".into(),
+            state: AgentState::Working,
+            updated_at_ms: 1,
+        };
+        state.upsert_observed_session(
+            ObservedSession {
+                session: synara.clone(),
+                context: Some(context.clone()),
+            },
+            0,
+        );
+        state.replace_hosted_sessions(
+            CNVS_OWNER_FOR_TEST,
+            vec![(
+                SessionStatus {
+                    id: "cnvs:canvas-1:node-1".into(),
+                    app: "CNVS".into(),
+                    title: "Project · Odin · Codex".into(),
+                    state: AgentState::Idle,
+                    updated_at_ms: 2,
+                },
+                context,
+            )],
+        );
+        assert!(state.registry.sessions.contains_key(&synara.id));
     }
 
     #[test]

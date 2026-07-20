@@ -16,7 +16,7 @@ use tracing::debug;
 use crate::hosts::host_from_cwd;
 use crate::title::{clean_title, looks_like_boilerplate, project_label_from_path};
 use crate::watch::{path_components_contain, watch_dir};
-use crate::{AdapterEvent, AdapterTx};
+use crate::{AdapterEvent, AdapterTx, ObservedSession, SessionContext};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Fingerprint {
@@ -55,7 +55,8 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
                 }
                 return;
             }
-            if let Some(session) = parse_claude_session(&path) {
+            if let Some(observed) = parse_claude_session(&path) {
+                let session = &observed.session;
                 path_ids_cb
                     .lock()
                     .unwrap()
@@ -72,13 +73,13 @@ pub fn spawn_claude_adapter(tx: AdapterTx) {
                 map.insert(session.id.clone(), fp);
                 drop(map);
                 debug!(id = %session.id, ?session.state, title = %session.title, "claude session");
-                let _ = tx.send(AdapterEvent::Upsert(session));
+                let _ = tx.send(AdapterEvent::Upsert(observed));
             }
         });
     }
 }
 
-fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
+fn parse_claude_session(path: &std::path::Path) -> Option<ObservedSession> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut id: Option<String> = None;
     let mut title: Option<String> = None;
@@ -154,12 +155,18 @@ fn parse_claude_session(path: &std::path::Path) -> Option<SessionStatus> {
 
     let updated_at_ms = file_mtime_ms(path).unwrap_or_else(now_ms);
 
-    Some(SessionStatus {
-        id: format!("claude:{id_raw}"),
-        app: claude_app_label(entrypoint.as_deref(), cwd.as_deref()),
-        title,
-        state,
-        updated_at_ms,
+    Some(ObservedSession {
+        session: SessionStatus {
+            id: format!("claude:{id_raw}"),
+            app: claude_app_label(entrypoint.as_deref(), cwd.as_deref()),
+            title,
+            state,
+            updated_at_ms,
+        },
+        context: cwd.map(|cwd| SessionContext {
+            runtime: "claude".into(),
+            cwd,
+        }),
     })
 }
 
@@ -256,7 +263,7 @@ mod tests {
             r#"{{"type":"user","sessionId":"s1","message":{{"role":"user","content":"Wire the menu bar tray icon"}}}}"#
         )
         .unwrap();
-        let session = parse_claude_session(&path).unwrap();
+        let session = parse_claude_session(&path).unwrap().session;
         assert_eq!(session.id, "claude:s1");
         assert_eq!(session.title, "Wire the menu bar tray icon");
         // No entrypoint in the journal → historical default.

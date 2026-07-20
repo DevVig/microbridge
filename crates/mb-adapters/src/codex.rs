@@ -16,7 +16,7 @@ use tracing::debug;
 use crate::hosts::host_from_cwd;
 use crate::title::{clean_title, cwd_basename, looks_like_boilerplate};
 use crate::watch::{path_components_contain, watch_dir};
-use crate::{AdapterEvent, AdapterTx};
+use crate::{AdapterEvent, AdapterTx, ObservedSession, SessionContext};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Fingerprint {
@@ -47,7 +47,8 @@ pub fn spawn_codex_adapter(tx: AdapterTx) {
             }
             return;
         }
-        if let Some(session) = parse_codex_session(&path) {
+        if let Some(observed) = parse_codex_session(&path) {
+            let session = &observed.session;
             path_ids_cb
                 .lock()
                 .unwrap()
@@ -64,12 +65,12 @@ pub fn spawn_codex_adapter(tx: AdapterTx) {
             map.insert(session.id.clone(), fp);
             drop(map);
             debug!(id = %session.id, ?session.state, title = %session.title, "codex session");
-            let _ = tx.send(AdapterEvent::Upsert(session));
+            let _ = tx.send(AdapterEvent::Upsert(observed));
         }
     });
 }
 
-fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
+fn parse_codex_session(path: &std::path::Path) -> Option<ObservedSession> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut id: Option<String> = None;
     let mut cwd: Option<String> = None;
@@ -160,12 +161,18 @@ fn parse_codex_session(path: &std::path::Path) -> Option<SessionStatus> {
 
     let updated_at_ms = file_mtime_ms(path).unwrap_or_else(now_ms);
 
-    Some(SessionStatus {
-        id: format!("codex:{id_raw}"),
-        app: codex_app_label(originator.as_deref(), cwd.as_deref()),
-        title,
-        state,
-        updated_at_ms,
+    Some(ObservedSession {
+        session: SessionStatus {
+            id: format!("codex:{id_raw}"),
+            app: codex_app_label(originator.as_deref(), cwd.as_deref()),
+            title,
+            state,
+            updated_at_ms,
+        },
+        context: cwd.map(|cwd| SessionContext {
+            runtime: "codex".into(),
+            cwd,
+        }),
     })
 }
 
@@ -262,7 +269,7 @@ mod tests {
             r#"{{"type":"event_msg","payload":{{"type":"task_started","turn_id":"t1"}}}}"#
         )
         .unwrap();
-        let session = parse_codex_session(&path).unwrap();
+        let session = parse_codex_session(&path).unwrap().session;
         assert_eq!(session.id, "codex:abc-123");
         assert_eq!(session.title, "Build the AIhero menu bar pet");
         assert_eq!(session.state, AgentState::Working);
@@ -279,7 +286,7 @@ mod tests {
             r#"{{"type":"session_meta","payload":{{"id":"t3-1","cwd":"/Users/me/dev/repo","originator":"t3code_desktop"}}}}"#
         )
         .unwrap();
-        let session = parse_codex_session(&path).unwrap();
+        let session = parse_codex_session(&path).unwrap().session;
         assert_eq!(session.id, "codex:t3-1");
         assert_eq!(session.app, "T3 Code");
     }
@@ -358,7 +365,7 @@ mod tests {
             r#"{{"type":"session_meta","payload":{{"id":"top-1","cwd":"/Users/me/dev/repo","originator":"synara_desktop","source":"vscode"}}}}"#
         )
         .unwrap();
-        let session = parse_codex_session(&path).unwrap();
+        let session = parse_codex_session(&path).unwrap().session;
         assert_eq!(session.id, "codex:top-1");
         assert_eq!(session.app, "Synara");
     }

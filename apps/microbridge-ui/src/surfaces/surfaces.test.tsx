@@ -33,6 +33,7 @@ function snapshot(sessions: SessionStatus[] = []): Snapshot {
       adapters: {
         codex: { enabled: true },
         claude: { enabled: true },
+        cnvs: { enabled: true },
         cursor: { enabled: true },
         t3code: { enabled: false },
         factory: { enabled: false },
@@ -43,6 +44,22 @@ function snapshot(sessions: SessionStatus[] = []): Snapshot {
       frontmost_app: null,
     },
     adapters: [
+      {
+        id: "cnvs",
+        display_name: "CNVS",
+        kind: "native",
+        state: "connected",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: true,
+          new_session: false,
+          focus_open: true,
+          reasoning_effort: false,
+        },
+        diagnostic: "Connected across 3 exact canvas terminal targets.",
+      },
       {
         id: "cursor",
         display_name: "Cursor",
@@ -98,7 +115,11 @@ describe("Settings", () => {
     expect(html).toContain("limited");
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
-    expect(html).toContain("Cursor and Factory ship inside Microbridge");
+    expect(html).toContain("CNVS connects automatically");
+    expect(html).toContain("Connected across 3 exact canvas terminal targets");
+    expect(html).toContain("✓ Open");
+    expect(html).toContain("Interrupt");
+    expect(html).toContain("Cursor and Factory ship");
     expect(html).toContain("Repair bundled integration");
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");

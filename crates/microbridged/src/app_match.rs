@@ -36,6 +36,9 @@ pub fn app_family(name: &str) -> String {
     if lower == "synara" || lower.starts_with("synara ") {
         return "synara".into();
     }
+    if lower == "cnvs" || lower.starts_with("cnvs ") {
+        return "cnvs".into();
+    }
     if is_codex(&lower) {
         return "codex".into();
     }
@@ -56,6 +59,7 @@ fn canonical_family(name: &str) -> Option<&'static str> {
         "Synara" => Some("synara"),
         "Conductor" => Some("conductor"),
         "Factory" => Some("factory"),
+        "CNVS" => Some("cnvs"),
         "Codex CLI" => Some("codex"),
         "Claude Code" => Some("claude_code"),
         "Claude Desktop" => Some("claude_desktop"),
@@ -114,6 +118,7 @@ mod tests {
         assert!(!same_app("Cursor", "T3 Code"));
         assert!(same_app("Conductor", "Conductor"));
         assert!(same_app("Factory", "Factory"));
+        assert!(same_app("CNVS", "CNVS"));
     }
 
     #[test]

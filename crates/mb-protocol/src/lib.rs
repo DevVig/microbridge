@@ -286,6 +286,7 @@ pub fn default_adapter_preferences() -> BTreeMap<String, AdapterPreference> {
     BTreeMap::from([
         ("codex".into(), AdapterPreference { enabled: true }),
         ("claude".into(), AdapterPreference { enabled: true }),
+        ("cnvs".into(), AdapterPreference { enabled: true }),
         ("cursor".into(), AdapterPreference { enabled: false }),
         ("t3code".into(), AdapterPreference { enabled: false }),
         ("factory".into(), AdapterPreference { enabled: false }),
