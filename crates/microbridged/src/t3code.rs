@@ -98,6 +98,7 @@ pub fn capabilities() -> AdapterCapabilities {
         // Enabled dynamically only when provider option descriptors become
         // available over the paired HTTP contract.
         reasoning_effort: false,
+        ..AdapterCapabilities::default()
     }
 }
 
@@ -497,6 +498,7 @@ async fn apply_snapshot(
             title: thread.title.clone(),
             state: map_state(&thread),
             updated_at_ms: parse_iso_ms(&thread.updated_at).unwrap_or_else(now_ms),
+            focus_uri: None,
         };
         if changed {
             state.upsert_session(session, T3_OWNER);

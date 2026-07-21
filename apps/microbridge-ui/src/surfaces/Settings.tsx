@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdapterCapabilities, DaemonConfig, Snapshot, StateColors } from "../lib/types";
 import {
   CODEX_PALETTE,
@@ -36,6 +36,8 @@ import {
   isHostAttributed,
 } from "../lib/hosts";
 import { integrationIcon } from "../lib/integrationIcons";
+import { openHostApp, openableHostApp } from "../lib/openHostApp";
+import { setupNextStep } from "../lib/integrationSetup";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -137,10 +139,22 @@ export function Settings({
   const [selectedIntegration, setSelectedIntegration] = useState<string | null>(
     null,
   );
+  const pairingInputRef = useRef<HTMLInputElement>(null);
+  const integrationDetailRef = useRef<HTMLDivElement>(null);
   // null until the login item has been read, and permanently null where a login
   // item is meaningless: outside Tauri, or in a dev build whose executable path
   // points into `target/debug`.
   const [atLogin, setAtLogin] = useState<boolean | null>(null);
+
+  const selectIntegration = (adapterId: string) => {
+    setSelectedIntegration(adapterId);
+    requestAnimationFrame(() => {
+      integrationDetailRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  };
 
   useEffect(() => {
     void appVersion().then(setVersion);
@@ -613,38 +627,39 @@ export function Settings({
             .map((adapter) => ({
               adapter,
               view: integrationView(adapter, snapshot.sessions),
-              actionable:
+              optIn:
                 adapter.kind === "community" && !isHostAttributed(adapter.id),
             }));
-          const groups = [
+          const connected = views.filter((item) => item.view.connectedGroup);
+          const notConnected = views.filter((item) => !item.view.connectedGroup);
+          const ordered = [
             {
               label: "Connected",
               light: "green" as const,
-              items: views.filter((item) => item.view.connectedGroup),
+              items: connected,
             },
             {
               label: "Not connected",
               light: "yellow" as const,
-              items: views.filter((item) => !item.view.connectedGroup),
+              items: notConnected,
             },
           ];
-          const selectable = views.filter((item) => item.actionable);
-          const activeId =
-            selectedIntegration &&
-            selectable.some((item) => item.adapter.id === selectedIntegration)
-              ? selectedIntegration
-              : (selectable.find((item) => !item.view.connectedGroup)?.adapter
-                  .id ??
-                selectable[0]?.adapter.id ??
-                null);
+          const activeId = selectedIntegration;
           const selected = views.find((item) => item.adapter.id === activeId);
+          const nextStep = selected
+            ? setupNextStep(selected.adapter.id)
+            : null;
+          const openAppLabel = selected
+            ? openableHostApp(selected.adapter.id)
+            : null;
           return (
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Compact tiles with each app&apos;s icon. Status color is always
-              visible; hover for detail. Click Cursor, Factory, T3 Code, or
-              OpenCode to enable or repair.
+              Click any tile for details. Cursor, Factory, T3 Code, and OpenCode
+              install on first click when they&apos;re off; they turn green or
+              Limited only after that host talks to Microbridge (reload /
+              restart / pair).
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
               Synara and the desktop apps share Claude/Codex journals — no
@@ -656,44 +671,95 @@ export function Settings({
                 {adapterMessage}
               </p>
             )}
-            {groups.map((group) => (
-              <div className="mt-5" key={group.label}>
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: t.textSecondary }}>
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.items.length ? TRAFFIC_COLORS[group.light].dot : t.textMuted }} />
-                  {group.label} · {group.items.length}
+            <div className="mt-5 grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5">
+              {ordered.map((group) => (
+                <div key={group.label} className="contents">
+                  <div
+                    className="col-span-3 mt-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] first:mt-0 sm:col-span-4 lg:col-span-5"
+                    style={{ color: t.textSecondary }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor: group.items.length
+                          ? TRAFFIC_COLORS[group.light].dot
+                          : t.textMuted,
+                      }}
+                    />
+                    {group.label} · {group.items.length}
+                  </div>
+                  {group.items.map(({ adapter, view, optIn }) => (
+                    <IntegrationCard
+                      key={adapter.id}
+                      name={adapter.display_name}
+                      iconSrc={integrationIcon(adapter.id)}
+                      diagnostic={view.diagnostic}
+                      light={view.light}
+                      label={view.label}
+                      theme={t}
+                      expandable={optIn}
+                      expanded={adapter.id === activeId}
+                      busy={adapterBusy.has(adapter.id)}
+                      onSelect={() => {
+                        selectIntegration(adapter.id);
+                        if (optIn && adapter.state === "disabled") {
+                          requestAnimationFrame(() => {
+                            void runAdapterOperation(adapter.id, () =>
+                              setAdapterEnabled(adapter.id, true),
+                            );
+                          });
+                          return;
+                        }
+                        if (
+                          adapter.id === "t3code" &&
+                          adapter.state === "needs_setup"
+                        ) {
+                          queueMicrotask(() =>
+                            pairingInputRef.current?.focus(),
+                          );
+                        }
+                      }}
+                    />
+                  ))}
                 </div>
-                <ul className="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5">
-              {group.items.map(({ adapter, view, actionable }) => (
-                <IntegrationCard
-                  key={adapter.id}
-                  name={adapter.display_name}
-                  iconSrc={integrationIcon(adapter.id)}
-                  diagnostic={view.diagnostic}
-                  light={view.light}
-                  label={view.label}
-                  theme={t}
-                  expandable={actionable}
-                  expanded={actionable && adapter.id === activeId}
-                  onSelect={
-                    actionable
-                      ? () =>
-                          setSelectedIntegration((current) =>
-                            current === adapter.id ? current : adapter.id,
-                          )
-                      : undefined
-                  }
-                />
               ))}
-                </ul>
-              </div>
-            ))}
+            </div>
+            {!selected && (
+              <p className="mt-3 text-[11px]" style={{ color: t.textMuted }}>
+                Select a tile for details.
+              </p>
+            )}
             {selected && (
               <IntegrationDetail
+                ref={integrationDetailRef}
                 name={selected.adapter.display_name}
                 iconSrc={integrationIcon(selected.adapter.id)}
                 diagnostic={selected.view.diagnostic}
                 theme={t}
               >
+                  {(selected.adapter.state === "needs_setup" ||
+                    selected.adapter.state === "disabled") &&
+                    nextStep && (
+                    <div
+                      className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
+                      style={{
+                        backgroundColor: TRAFFIC_COLORS.yellow.bg,
+                        color: TRAFFIC_COLORS.yellow.fg,
+                      }}
+                    >
+                      <div className="font-medium">
+                        {selected.adapter.state === "disabled"
+                          ? "Do this next (after install)"
+                          : "Do this next"}
+                      </div>
+                      <p className="mt-1">{nextStep}</p>
+                      {selected.adapter.state === "needs_setup" && (
+                        <p className="mt-1 opacity-90">
+                          {selected.view.diagnostic}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {CAPABILITIES.map((capability) => (
                       <span
@@ -711,6 +777,7 @@ export function Settings({
                   {selected.adapter.id === "t3code" && selected.adapter.state !== "disabled" && (
                     <div className="mt-3 flex max-w-xl gap-2">
                       <input
+                        ref={pairingInputRef}
                         type="password"
                         value={pairingUrl}
                         onChange={(event) => setPairingUrl(event.target.value)}
@@ -735,7 +802,17 @@ export function Settings({
                       </button>
                     </div>
                   )}
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {openAppLabel && (
+                      <button
+                        type="button"
+                        className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
+                        style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
+                        onClick={() => void openHostApp(selected.adapter.id)}
+                      >
+                        Open {openAppLabel}
+                      </button>
+                    )}
                     {selected.adapter.kind === "community" && !cfg.adapters[selected.adapter.id]?.enabled && (
                       <button
                         type="button"

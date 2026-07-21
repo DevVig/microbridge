@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 import type { ThemeTokens } from "../lib/theme";
 import {
   TRAFFIC_COLORS,
@@ -12,6 +12,7 @@ function TileFace({
   light,
   label,
   theme,
+  busy,
 }: {
   name: string;
   iconSrc?: string;
@@ -19,6 +20,7 @@ function TileFace({
   light: TrafficLight;
   label: string;
   theme: ThemeTokens;
+  busy?: boolean;
 }) {
   const colors = TRAFFIC_COLORS[light];
   return (
@@ -56,7 +58,7 @@ function TileFace({
           className="mt-0.5 truncate text-[9.5px] font-medium leading-tight"
           style={{ color: colors.fg }}
         >
-          {label}
+          {busy ? "Installing…" : label}
         </div>
       </div>
       <div
@@ -83,6 +85,7 @@ export function IntegrationCard({
   theme,
   expandable = false,
   expanded = false,
+  busy = false,
   onSelect,
 }: {
   name: string;
@@ -93,14 +96,16 @@ export function IntegrationCard({
   theme: ThemeTokens;
   expandable?: boolean;
   expanded?: boolean;
+  busy?: boolean;
   onSelect?: () => void;
 }) {
   const colors = TRAFFIC_COLORS[light];
   const shellStyle = {
-    backgroundColor: theme.panel,
-    border: `1px solid ${expanded ? colors.dot : theme.hairline}`,
-    boxShadow: expanded ? `0 0 0 1px ${colors.dot}33` : undefined,
+    backgroundColor: expanded ? `${colors.dot}14` : theme.panel,
+    border: `1.5px solid ${expanded ? colors.dot : theme.hairline}`,
+    boxShadow: expanded ? `0 0 0 2px ${colors.dot}28` : undefined,
     color: theme.text,
+    opacity: busy ? 0.72 : 1,
   } as const;
 
   const face = (
@@ -111,55 +116,43 @@ export function IntegrationCard({
       light={light}
       label={label}
       theme={theme}
+      busy={busy}
     />
   );
 
   const className =
-    "group relative flex h-[72px] w-full flex-col items-stretch justify-between rounded-xl px-2 py-1.5 text-left transition-colors";
+    "group relative flex h-[72px] w-full cursor-pointer flex-col items-stretch justify-between rounded-xl px-2 py-1.5 text-left transition-[background-color,border-color,box-shadow,opacity]";
 
   return (
     <li className="relative list-none">
-      {onSelect ? (
-        <button
-          type="button"
-          onClick={onSelect}
-          title={diagnostic}
-          aria-label={`${name}: ${label}. ${diagnostic}`}
-          aria-expanded={expandable ? expanded : undefined}
-          className={className}
-          style={shellStyle}
-        >
-          {face}
-        </button>
-      ) : (
-        <div
-          title={diagnostic}
-          aria-label={`${name}: ${label}. ${diagnostic}`}
-          className={className}
-          style={shellStyle}
-        >
-          {face}
-        </div>
-      )}
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-label={`${name}: ${busy ? "Installing" : label}. ${diagnostic}`}
+        aria-expanded={expandable ? expanded : undefined}
+        aria-busy={busy || undefined}
+        className={className}
+        style={shellStyle}
+      >
+        {face}
+      </button>
     </li>
   );
 }
 
-export function IntegrationDetail({
-  name,
-  iconSrc,
-  diagnostic,
-  theme,
-  children,
-}: {
-  name: string;
-  iconSrc?: string;
-  diagnostic: string;
-  theme: ThemeTokens;
-  children?: ReactNode;
-}) {
+export const IntegrationDetail = forwardRef<
+  HTMLDivElement,
+  {
+    name: string;
+    iconSrc?: string;
+    diagnostic: string;
+    theme: ThemeTokens;
+    children?: ReactNode;
+  }
+>(function IntegrationDetail({ name, iconSrc, diagnostic, theme, children }, ref) {
   return (
     <div
+      ref={ref}
       className="mt-3 rounded-2xl px-3 py-3"
       style={{
         backgroundColor: theme.panel,
@@ -185,4 +178,4 @@ export function IntegrationDetail({
       {children}
     </div>
   );
-}
+});

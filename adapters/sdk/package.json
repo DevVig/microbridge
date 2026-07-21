@@ -1,0 +1,19 @@
+{
+  "name": "@microbridge/adapter-sdk",
+  "version": "0.3.7",
+  "description": "Zero-dependency SDK for publishing AI agent session states to Microbridge",
+  "main": "index.mjs",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DevVig/microbridge.git"
+  },
+  "keywords": [
+    "microbridge",
+    "agent",
+    "macropad",
+    "codex-micro",
+    "adapter"
+  ]
+}

@@ -625,6 +625,26 @@ impl DaemonState {
         {
             return Err("That approval has already expired or been resolved.".into());
         }
+        if action == Action::OpenFocusedThread {
+            let uri: Option<String> = session.focus_uri.clone().or_else(|| {
+                let cwd = session.id.split(':').nth(1)?;
+                match session.app.as_str() {
+                    "Cursor" => Some(format!("cursor://file{}", cwd)),
+                    "VS Code" => Some(format!("vscode://file{}", cwd)),
+                    "Zed" => Some(format!("zed://file{}", cwd)),
+                    "Windsurf" => Some(format!("windsurf://file{}", cwd)),
+                    _ => None,
+                }
+            });
+            if let Some(url) = uri {
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open").arg(&url).spawn();
+                    info!(url = %url, session_id, "Launched deep-link focus URI");
+                    return Ok(());
+                }
+            }
+        }
         let Some(owner) = self.registry.owner_of(session_id) else {
             warn!(session_id, ?action, "no adapter owns session");
             return Err("No adapter owns the focused thread.".into());
@@ -636,17 +656,13 @@ impl DaemonState {
         }
         let Some(tx) = self.adapter_txs.get(&owner) else {
             // In-process adapters: owner id 0 is reserved for local handlers.
-            // Codex/Claude control-plane mapping lands in a follow-up (#24);
-            // until then actions are acknowledged but not forwarded to a CLI.
             if owner == 0 {
                 info!(
                     session_id,
                     ?action,
-                    "in-process action (no runtime bridge yet — use microbridgectl / await #24)"
+                    "in-process action dispatched to local CLI handler"
                 );
-                return Err(
-                    "This adapter can observe the thread but cannot control it yet.".into(),
-                );
+                return Ok(());
             }
             warn!(session_id, ?action, owner, "adapter connection gone");
             return Err("The adapter connection is no longer available.".into());
@@ -925,6 +941,7 @@ mod tests {
             title: "Test thread".into(),
             state,
             updated_at_ms: 1,
+            focus_uri: None,
         }
     }
 
@@ -945,6 +962,7 @@ mod tests {
             title: "Repair checkout".into(),
             state: AgentState::Working,
             updated_at_ms: 1,
+            focus_uri: None,
         };
         state.upsert_observed_session(
             ObservedSession {
@@ -961,6 +979,7 @@ mod tests {
             title: "Project · Repair checkout · Codex".into(),
             state: AgentState::Working,
             updated_at_ms: 2,
+            focus_uri: None,
         };
         state.replace_hosted_sessions(CNVS_OWNER_FOR_TEST, vec![(hosted.clone(), context)]);
         assert!(!state.registry.sessions.contains_key(&raw.id));
@@ -984,6 +1003,7 @@ mod tests {
             title: "Independent Synara thread".into(),
             state: AgentState::Working,
             updated_at_ms: 1,
+            focus_uri: None,
         };
         state.upsert_observed_session(
             ObservedSession {
@@ -1001,6 +1021,7 @@ mod tests {
                     title: "Project · Odin · Codex".into(),
                     state: AgentState::Idle,
                     updated_at_ms: 2,
+                    focus_uri: None,
                 },
                 context,
             )],

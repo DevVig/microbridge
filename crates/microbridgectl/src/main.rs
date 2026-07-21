@@ -120,6 +120,7 @@ async fn run_factory_event() -> ExitCode {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64,
+        focus_uri: None,
     };
     match send_operation(ClientMessage::IngestLifecycle {
         adapter_id: "factory".into(),
@@ -170,6 +171,7 @@ async fn run_cursor_event(args: Vec<String>) -> ExitCode {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64,
+        focus_uri: None,
     };
     match send_operation(ClientMessage::IngestLifecycle {
         adapter_id: "cursor".into(),

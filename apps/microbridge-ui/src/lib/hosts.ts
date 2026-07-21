@@ -70,7 +70,7 @@ export interface IntegrationView {
 
 const STATE_LABELS: Record<AdapterConnectionState, string> = {
   disabled: "Not connected",
-  needs_setup: "Waiting",
+  needs_setup: "Setup needed",
   connecting: "Connecting",
   connected: "Connected",
   limited: "Limited",
@@ -82,6 +82,11 @@ function lightForState(state: AdapterConnectionState): TrafficLight {
   if (state === "connected") return "green";
   if (state === "error" || state === "incompatible") return "red";
   return "yellow";
+}
+
+/** Live links belong in Connected — including partial (limited) capability. */
+function connectedGroupForState(state: AdapterConnectionState): boolean {
+  return state === "connected" || state === "limited";
 }
 
 /**
@@ -128,7 +133,7 @@ export function integrationView(
     }
     return {
       light: "yellow",
-      label: "Waiting",
+      label: "Idle",
       diagnostic:
         "via Claude & Codex journals — no separate adapter needed. Waiting for sessions.",
       connectedGroup: false,
@@ -157,7 +162,7 @@ export function integrationView(
     light,
     label: STATE_LABELS[adapter.state],
     diagnostic: adapter.diagnostic,
-    connectedGroup: light === "green",
+    connectedGroup: connectedGroupForState(adapter.state),
   };
 }
 

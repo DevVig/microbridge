@@ -162,6 +162,7 @@ fn parse_claude_session(path: &std::path::Path) -> Option<ObservedSession> {
             title,
             state,
             updated_at_ms,
+            focus_uri: None,
         },
         context: cwd.map(|cwd| SessionContext {
             runtime: "claude".into(),

@@ -168,6 +168,7 @@ fn parse_codex_session(path: &std::path::Path) -> Option<ObservedSession> {
             title,
             state,
             updated_at_ms,
+            focus_uri: None,
         },
         context: cwd.map(|cwd| SessionContext {
             runtime: "codex".into(),

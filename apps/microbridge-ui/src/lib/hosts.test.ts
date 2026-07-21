@@ -54,13 +54,13 @@ describe("integrationView", () => {
     expect(view.diagnostic).toContain("no separate adapter");
   });
 
-  it("marks Synara yellow while waiting for sessions", () => {
+  it("marks Synara idle when there are no sessions", () => {
     const view = integrationView(
       adapter({ id: "synara", display_name: "Synara", state: "connected" }),
       [],
     );
     expect(view.light).toBe("yellow");
-    expect(view.label).toBe("Waiting");
+    expect(view.label).toBe("Idle");
     expect(view.connectedGroup).toBe(false);
   });
 
@@ -86,6 +86,36 @@ describe("integrationView", () => {
     );
     expect(view.light).toBe("green");
     expect(view.label).toBe("Connected");
+  });
+
+  it("puts limited adapters in the Connected group", () => {
+    const view = integrationView(
+      adapter({
+        id: "cursor",
+        display_name: "Cursor",
+        kind: "community",
+        state: "limited",
+        diagnostic: "Lifecycle is connected; unsupported IDE commands remain disabled.",
+      }),
+      [],
+    );
+    expect(view.label).toBe("Limited");
+    expect(view.connectedGroup).toBe(true);
+  });
+
+  it("labels needs_setup as Setup needed", () => {
+    const view = integrationView(
+      adapter({
+        id: "opencode",
+        display_name: "OpenCode",
+        kind: "community",
+        state: "needs_setup",
+        diagnostic: "The bundled OpenCode integration is installed.",
+      }),
+      [],
+    );
+    expect(view.label).toBe("Setup needed");
+    expect(view.connectedGroup).toBe(false);
   });
 
   it("maps adapter errors to red", () => {

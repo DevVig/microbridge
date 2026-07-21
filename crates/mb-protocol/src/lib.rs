@@ -40,6 +40,9 @@ pub struct SessionStatus {
     pub state: AgentState,
     /// Milliseconds since the Unix epoch, supplied by the adapter.
     pub updated_at_ms: u64,
+    /// Optional URI scheme target for deep-link focus (e.g. `cursor://file/...`).
+    #[serde(default)]
+    pub focus_uri: Option<String>,
 }
 
 /// The exact LED state the daemon resolved for one physical Agent Key.
@@ -221,6 +224,12 @@ pub struct AdapterCapabilities {
     pub focus_open: bool,
     #[serde(default)]
     pub reasoning_effort: bool,
+    #[serde(default)]
+    pub tty_control: bool,
+    #[serde(default)]
+    pub mcp_native: bool,
+    #[serde(default)]
+    pub uri_focus: bool,
 }
 
 impl AdapterCapabilities {
@@ -240,6 +249,9 @@ impl AdapterCapabilities {
             new_session: true,
             focus_open: true,
             reasoning_effort: true,
+            tty_control: true,
+            mcp_native: true,
+            uri_focus: true,
         }
     }
 
@@ -543,6 +555,7 @@ mod tests {
                 title: "fix flaky e2e retries".into(),
                 state: AgentState::AwaitingApproval,
                 updated_at_ms: 1,
+                focus_uri: None,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
