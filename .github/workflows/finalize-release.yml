@@ -74,7 +74,7 @@ jobs:
           syspolicy_check distribution "$APP"
           SERVICE_STATE=""
           for _ in {1..30}; do
-            SERVICE_STATE="$(brew services list | awk '$1 == "microbridge" { print $2; exit }')"
+            SERVICE_STATE="$(brew services list --json | jq -r '.[] | select(.name=="microbridge") | .status' | head -1)"
             [[ "$SERVICE_STATE" == "started" || "$SERVICE_STATE" == "scheduled" ]] && break
             sleep 1
           done
@@ -95,7 +95,7 @@ jobs:
           wait "$APP_PID" || true
           brew services stop DevVig/microbridge/microbridge
           HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall DevVig/microbridge/microbridge
-          if brew services list | grep -q '^microbridge[[:space:]]'; then
+          if brew services list --json | jq -e '.[] | select(.name=="microbridge")' >/dev/null; then
             echo "microbridge service is still registered after uninstall" >&2
             exit 1
           fi

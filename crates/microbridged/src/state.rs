@@ -1091,6 +1091,32 @@ mod tests {
     }
 
     #[test]
+    fn route_action_open_focused_thread_uses_focus_uri() {
+        let mut state = state();
+        let mut sess = session("cursor:one", AgentState::Working);
+        sess.focus_uri = Some("cursor://file/test".into());
+        state.upsert_session(sess, 0);
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(
+                state
+                    .route_action("cursor:one", Action::OpenFocusedThread)
+                    .is_ok()
+            );
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let error = state
+                .route_action("cursor:one", Action::OpenFocusedThread)
+                .unwrap_err();
+            assert!(error.contains("only supported on macOS"));
+            assert!(error.contains("cursor://file/test"));
+        }
+    }
+
+    #[test]
     fn route_action_rejects_unadvertised_capability() {
         let mut state = state();
         state.config.adapters.get_mut("cursor").unwrap().enabled = true;
