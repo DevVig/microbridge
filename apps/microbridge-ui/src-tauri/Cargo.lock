@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "mb-protocol"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "serde",
 ]
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "microbridge-ui"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "mb-protocol",
  "serde",
