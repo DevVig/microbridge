@@ -124,6 +124,7 @@ mod tests {
             title: String::new(),
             state,
             updated_at_ms: at,
+            focus_uri: None,
         }
     }
 

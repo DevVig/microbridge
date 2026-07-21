@@ -1,11 +1,13 @@
 //! microbridged library — status bus, focus policy, key source, socket server.
 
 pub mod app_match;
+pub mod auto_discover;
 pub mod cnvs;
 pub mod config;
 pub mod factory;
 pub mod frontmost;
 pub mod key_source;
+pub mod mcp;
 pub mod registry;
 pub mod socket;
 pub mod state;

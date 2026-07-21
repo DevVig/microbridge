@@ -131,27 +131,73 @@ describe("Settings", () => {
     );
     expect(html).toContain("Limited");
     expect(html).toContain("Lifecycle is connected");
-    expect(html).toContain("Live state");
     expect(html).toContain("Integrations");
     expect(html).toContain("grid-cols-3");
     expect(html).toContain("integrations/");
-    // Synara waits (yellow) with no sessions; CNVS stays connected.
-    expect(html).toContain("Connected · 1");
-    expect(html).toContain("Not connected · 2");
-    expect(html).toContain("Waiting");
+    // CNVS connected + Cursor limited; Synara idle with no sessions.
+    expect(html).toContain("Connected · 2");
+    expect(html).toContain("Not connected · 1");
+    expect(html).toContain("Idle");
+    expect(html).not.toContain(">Waiting<");
     expect(html).toContain("Synara");
     expect(html).toContain("no separate adapter needed");
     expect(html).toContain("Connected across 3 exact canvas terminal targets");
-    expect(html).toContain("✓ Live state");
-    expect(html).toContain("— Open");
-    expect(html).toContain("Interrupt");
-    // Cursor is auto-selected as the first actionable not-connected tile.
-    expect(html).toContain("Repair bundled integration");
-    expect(html).toContain("hover for detail");
+    // No phantom selection until the user clicks a tile.
+    expect(html).toContain("Select a tile for details.");
+    expect(html).not.toContain("Repair bundled integration");
+    expect(html).not.toContain("✓ Live state");
+    expect(html).toContain("install on first click");
     expect(html).toContain('width="28"');
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");
     expect(html).not.toContain("not production");
+  });
+
+  it("shows setup next-step when a needs_setup tile is selected", () => {
+    const base = snapshot();
+    const html = renderToStaticMarkup(
+      <Settings
+        snapshot={{
+          ...base,
+          adapters: [
+            ...base.adapters,
+            {
+              id: "opencode",
+              display_name: "OpenCode",
+              kind: "community",
+              state: "needs_setup",
+              capabilities: {
+                lifecycle_observation: false,
+                approval_acceptance: false,
+                approval_rejection: false,
+                interrupt: false,
+                new_session: false,
+                focus_open: false,
+                reasoning_effort: false,
+              },
+              diagnostic:
+                "The bundled OpenCode integration is installed. Restart OpenCode once if it is already running.",
+            },
+          ],
+          config: {
+            ...base.config,
+            adapters: {
+              ...base.config.adapters,
+              opencode: { enabled: true },
+            },
+          },
+        }}
+        dark
+        tab="integrations"
+        onTab={noop}
+        onConfig={noop}
+        onClose={noop}
+      />,
+    );
+    // Still no detail until click — selection is user-driven.
+    expect(html).toContain("Select a tile for details.");
+    expect(html).toContain("Setup needed");
+    expect(html).toContain("Not connected · 2");
   });
 
   it("shows Synara as Active when sessions are attributed", () => {
@@ -174,8 +220,8 @@ describe("Settings", () => {
       />,
     );
     expect(html).toContain("Active · 1 thread");
-    expect(html).toContain("Connected · 2");
-    expect(html).toContain("Not connected · 1");
+    expect(html).toContain("Connected · 3");
+    expect(html).toContain("Not connected · 0");
   });
 });
 

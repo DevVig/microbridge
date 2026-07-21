@@ -59,6 +59,7 @@ export function lifecycleMessages(event, now = Date.now()) {
         title: event.title,
         state,
         updated_at_ms: now,
+        focus_uri: event.workspace ? `cursor://file${event.workspace}` : null,
       },
       ttl_ms: event.lifecycle === "session_end" ? 1_000 : 30 * 60 * 1_000,
     },

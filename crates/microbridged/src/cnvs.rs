@@ -182,6 +182,7 @@ fn hosted_session(canvas: &CanvasSummary, node: Node) -> Option<(SessionStatus, 
             title,
             state,
             updated_at_ms: now_ms(),
+            focus_uri: None,
         },
         SessionContext { runtime, cwd },
     ))

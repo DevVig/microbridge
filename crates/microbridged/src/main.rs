@@ -51,6 +51,8 @@ async fn main() -> std::io::Result<()> {
     t3code::spawn(Arc::clone(&shared), t3_action_rx);
     factory::spawn(Arc::clone(&shared), factory_action_rx);
     cnvs::spawn(Arc::clone(&shared), cnvs_action_rx);
+    microbridged::mcp::spawn_mcp_server(Arc::clone(&shared));
+    microbridged::auto_discover::spawn_auto_discovery(Arc::clone(&shared));
 
     // Hardware notifications are non-blocking. This small bounded drain also
     // expires lease-backed IDE hook sessions without introducing network polling.
