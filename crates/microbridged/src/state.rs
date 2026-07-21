@@ -1099,11 +1099,9 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         {
-            assert!(
-                state
-                    .route_action("cursor:one", Action::OpenFocusedThread)
-                    .is_ok()
-            );
+            assert!(state
+                .route_action("cursor:one", Action::OpenFocusedThread)
+                .is_ok());
         }
 
         #[cfg(not(target_os = "macos"))]
