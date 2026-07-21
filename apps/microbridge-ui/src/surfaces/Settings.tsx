@@ -35,6 +35,7 @@ import {
   integrationView,
   isHostAttributed,
 } from "../lib/hosts";
+import { integrationIcon } from "../lib/integrationIcons";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -641,9 +642,9 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Each app is a tile. Green / yellow / red is always visible; hover
-              for detail. Click Cursor, Factory, T3 Code, or OpenCode to enable
-              or repair.
+              Compact tiles with each app&apos;s icon. Status color is always
+              visible; hover for detail. Click Cursor, Factory, T3 Code, or
+              OpenCode to enable or repair.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
               Synara and the desktop apps share Claude/Codex journals — no
@@ -661,11 +662,12 @@ export function Settings({
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.items.length ? TRAFFIC_COLORS[group.light].dot : t.textMuted }} />
                   {group.label} · {group.items.length}
                 </div>
-                <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <ul className="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5">
               {group.items.map(({ adapter, view, actionable }) => (
                 <IntegrationCard
                   key={adapter.id}
                   name={adapter.display_name}
+                  iconSrc={integrationIcon(adapter.id)}
                   diagnostic={view.diagnostic}
                   light={view.light}
                   label={view.label}
@@ -688,6 +690,7 @@ export function Settings({
             {selected && (
               <IntegrationDetail
                 name={selected.adapter.display_name}
+                iconSrc={integrationIcon(selected.adapter.id)}
                 diagnostic={selected.view.diagnostic}
                 theme={t}
               >
