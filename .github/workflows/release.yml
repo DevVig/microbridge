@@ -215,7 +215,7 @@ jobs:
           fi
 
           # Updater artifacts (in-app self-updater). Renamed per-arch so the two
-          # matrix legs don't collide as release assets; latest.json points here.
+          # matrix legs don't collide as release assets; update.json points here.
           UPD=""
           while IFS= read -r candidate; do
             UPD="$candidate"
@@ -272,7 +272,7 @@ jobs:
             test -f "release-assets/microbridge-ui-${TAG}-${target}.dmg"
           done
           shasum -a 256 release-assets/* > release-assets/SHA256SUMS
-      - name: Generate updater manifest (latest.json)
+      - name: Generate updater manifest (update.json)
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -281,10 +281,12 @@ jobs:
           SIG_AARCH="$(find artifacts -type f -name 'Microbridge-aarch64-apple-darwin.app.tar.gz.sig' | head -1)"
           SIG_X86="$(find artifacts -type f -name 'Microbridge-x86_64-apple-darwin.app.tar.gz.sig' | head -1)"
           if [[ -z "$SIG_AARCH" || -z "$SIG_X86" ]]; then
-            echo "Updater signatures missing — skipping latest.json (no in-app update for this release)"
+            echo "Updater signatures missing — skipping update.json (no in-app update for this release)"
             exit 0
           fi
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Use update.json (not latest.json): GitHub's /releases/latest/download/latest.json
+          # redirect can stick to an older release asset of the same name.
           jq -n \
             --arg version "$VERSION" \
             --arg notes "Microbridge ${TAG}. See the GitHub release notes for details." \
@@ -294,10 +296,10 @@ jobs:
             --arg sig_x "$(cat "$SIG_X86")" \
             --arg url_x "${BASE}/Microbridge-x86_64-apple-darwin.app.tar.gz" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"darwin-aarch64": {signature: $sig_a, url: $url_a}, "darwin-x86_64": {signature: $sig_x, url: $url_x}}}' \
-            > release-assets/latest.json
-          echo "Wrote latest.json:"
-          cat release-assets/latest.json
-          test "$(jq -r .version release-assets/latest.json)" = "$VERSION"
+            > release-assets/update.json
+          echo "Wrote update.json:"
+          cat release-assets/update.json
+          test "$(jq -r .version release-assets/update.json)" = "$VERSION"
       - uses: actions/upload-artifact@v7
         with:
           name: release-assets-${{ github.ref_name }}

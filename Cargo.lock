@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "mb-adapters"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "mb-protocol",
  "notify",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "mb-device"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "hidapi",
  "mb-protocol",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "mb-protocol"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -653,7 +653,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "microbridgectl"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "mb-device",
  "mb-protocol",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "microbridged"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "keyring",
  "mb-adapters",
