@@ -74,7 +74,7 @@ jobs:
           syspolicy_check distribution "$APP"
           SERVICE_STATE=""
           for _ in {1..30}; do
-            SERVICE_STATE="$(brew services list --json | jq -r '.[] | select(.name=="microbridge") | .status' | head -1)"
+            SERVICE_STATE="$(brew services list --json | jq -r 'map(select(.name=="microbridge")) | .[0].status // empty')"
             [[ "$SERVICE_STATE" == "started" || "$SERVICE_STATE" == "scheduled" ]] && break
             sleep 1
           done
