@@ -643,6 +643,12 @@ impl DaemonState {
                     info!(url = %url, session_id, "Launched deep-link focus URI");
                     return Ok(());
                 }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    return Err(format!(
+                        "Opening the focused thread via deep link is only supported on macOS ({url})."
+                    ));
+                }
             }
         }
         let Some(owner) = self.registry.owner_of(session_id) else {
