@@ -83,7 +83,7 @@ syspolicy_check distribution "$APP"
 
 SERVICE_STATE=""
 for _ in {1..30}; do
-  SERVICE_STATE="$(brew services list | awk '$1 == "microbridge" { print $2; exit }')"
+  SERVICE_STATE="$(brew services list --json | jq -r 'map(select(.name=="microbridge")) | .[0].status // empty')"
   [[ "$SERVICE_STATE" == "started" || "$SERVICE_STATE" == "scheduled" ]] && break
   sleep 1
 done
@@ -99,7 +99,7 @@ wait "$APP_PID" || true
 brew services stop "$TAP/microbridge"
 HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge"
 test ! -e "$(brew --cellar)/microbridge/$VERSION"
-if brew services list | grep -q '^microbridge[[:space:]]'; then
+if brew services list --json | jq -e '.[] | select(.name=="microbridge")' >/dev/null; then
   echo "microbridge service is still registered after uninstall" >&2
   exit 1
 fi
