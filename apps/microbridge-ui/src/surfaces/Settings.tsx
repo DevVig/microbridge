@@ -37,7 +37,8 @@ import {
 } from "../lib/hosts";
 import { integrationIcon } from "../lib/integrationIcons";
 import { openHostApp, openableHostApp } from "../lib/openHostApp";
-import { setupNextStep } from "../lib/integrationSetup";
+import { integrationGuidance } from "../lib/integrationSetup";
+import { MeshBackground } from "../components/MeshBackground";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -203,15 +204,16 @@ export function Settings({
 
   return (
     <div
-      className="flex min-h-screen w-full"
+      className="relative flex min-h-screen w-full"
       style={{
         background: dark ? "#0A0A0B" : "#E9E9E7",
         fontFamily: "Inter, system-ui, sans-serif",
         color: t.text,
       }}
     >
+      <MeshBackground dark={dark} active />
       <aside
-        className="flex w-[200px] flex-col border-r px-3 py-4"
+        className="relative z-10 flex w-[200px] flex-col border-r px-3 py-4"
         style={{
           borderColor: t.hairline,
           backgroundColor: t.panel,
@@ -242,7 +244,7 @@ export function Settings({
         </button>
       </aside>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="relative z-10 flex-1 overflow-auto p-6">
         {tab === "general" && (
           <section>
             <h1 className="text-[18px] font-semibold">General</h1>
@@ -626,7 +628,9 @@ export function Settings({
             )
             .map((adapter) => ({
               adapter,
-              view: integrationView(adapter, snapshot.sessions),
+              view: integrationView(adapter, snapshot.sessions, {
+                enabled: cfg.adapters[adapter.id]?.enabled,
+              }),
               optIn:
                 adapter.kind === "community" && !isHostAttributed(adapter.id),
             }));
@@ -646,8 +650,11 @@ export function Settings({
           ];
           const activeId = selectedIntegration;
           const selected = views.find((item) => item.adapter.id === activeId);
-          const nextStep = selected
-            ? setupNextStep(selected.adapter.id)
+          const guidance = selected
+            ? integrationGuidance(selected.adapter.id, selected.adapter.state, {
+                enabled: cfg.adapters[selected.adapter.id]?.enabled,
+                label: selected.view.label,
+              })
             : null;
           const openAppLabel = selected
             ? openableHostApp(selected.adapter.id)
@@ -656,15 +663,16 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Click any tile for details. Cursor, Factory, T3 Code, and OpenCode
-              install on first click when they&apos;re off; they turn green or
-              Limited only after that host talks to Microbridge (reload /
-              restart / pair).
+              Click any tile for details and next steps. Cursor, Factory, T3
+              Code, and OpenCode install on first click when they&apos;re off;
+              they turn green or Limited only after that host talks to
+              Microbridge (reload / restart / pair).
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              Synara and the desktop apps share Claude/Codex journals — no
-              separate adapter. For T3 controls, enable Network access in T3 Code
-              Settings → Connections, then paste a pairing link below.
+              Synara and the desktop apps share Claude/Codex journals — Idle
+              means waiting for sessions, not a broken setup. For T3 controls,
+              enable Network access in T3 Code Settings → Connections, then
+              paste a pairing link below.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
@@ -702,7 +710,12 @@ export function Settings({
                       busy={adapterBusy.has(adapter.id)}
                       onSelect={() => {
                         selectIntegration(adapter.id);
-                        if (optIn && adapter.state === "disabled") {
+                        if (
+                          optIn &&
+                          (adapter.state === "disabled" ||
+                            (adapter.state === "needs_setup" &&
+                              cfg.adapters[adapter.id]?.enabled === false))
+                        ) {
                           requestAnimationFrame(() => {
                             void runAdapterOperation(adapter.id, () =>
                               setAdapterEnabled(adapter.id, true),
@@ -736,30 +749,12 @@ export function Settings({
                 iconSrc={integrationIcon(selected.adapter.id)}
                 diagnostic={selected.view.diagnostic}
                 theme={t}
+                guidance={
+                  guidance
+                    ? { title: guidance.title, steps: guidance.steps }
+                    : null
+                }
               >
-                  {(selected.adapter.state === "needs_setup" ||
-                    selected.adapter.state === "disabled") &&
-                    nextStep && (
-                    <div
-                      className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
-                      style={{
-                        backgroundColor: TRAFFIC_COLORS.yellow.bg,
-                        color: TRAFFIC_COLORS.yellow.fg,
-                      }}
-                    >
-                      <div className="font-medium">
-                        {selected.adapter.state === "disabled"
-                          ? "Do this next (after install)"
-                          : "Do this next"}
-                      </div>
-                      <p className="mt-1">{nextStep}</p>
-                      {selected.adapter.state === "needs_setup" && (
-                        <p className="mt-1 opacity-90">
-                          {selected.view.diagnostic}
-                        </p>
-                      )}
-                    </div>
-                  )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {CAPABILITIES.map((capability) => (
                       <span

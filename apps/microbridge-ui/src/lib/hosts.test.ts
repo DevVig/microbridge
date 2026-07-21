@@ -113,8 +113,25 @@ describe("integrationView", () => {
         diagnostic: "The bundled OpenCode integration is installed.",
       }),
       [],
+      { enabled: true },
     );
     expect(view.label).toBe("Setup needed");
+    expect(view.connectedGroup).toBe(false);
+  });
+
+  it("labels auto-discovered needs_setup when disabled as Detected", () => {
+    const view = integrationView(
+      adapter({
+        id: "cursor",
+        display_name: "Cursor",
+        kind: "community",
+        state: "needs_setup",
+        diagnostic: "Cursor detected on local machine.",
+      }),
+      [],
+      { enabled: false },
+    );
+    expect(view.label).toBe("Detected — click to install");
     expect(view.connectedGroup).toBe(false);
   });
 

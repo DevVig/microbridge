@@ -147,9 +147,13 @@ export const IntegrationDetail = forwardRef<
     iconSrc?: string;
     diagnostic: string;
     theme: ThemeTokens;
+    guidance?: { title: string; steps: string[] } | null;
     children?: ReactNode;
   }
->(function IntegrationDetail({ name, iconSrc, diagnostic, theme, children }, ref) {
+>(function IntegrationDetail(
+  { name, iconSrc, diagnostic, theme, guidance, children },
+  ref,
+) {
   return (
     <div
       ref={ref}
@@ -175,6 +179,22 @@ export const IntegrationDetail = forwardRef<
       <div className="mt-1 text-[11px]" style={{ color: theme.textSecondary }}>
         {diagnostic}
       </div>
+      {guidance && guidance.steps.length > 0 && (
+        <div
+          className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
+          style={{
+            backgroundColor: TRAFFIC_COLORS.yellow.bg,
+            color: TRAFFIC_COLORS.yellow.fg,
+          }}
+        >
+          <div className="font-medium">{guidance.title}</div>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+            {guidance.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
       {children}
     </div>
   );

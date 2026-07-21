@@ -92,10 +92,14 @@ function connectedGroupForState(state: AdapterConnectionState): boolean {
 /**
  * Derive the card's traffic light, label, and diagnostic from daemon adapter
  * state plus live session attribution.
+ *
+ * Pass `enabled` from config when known so auto-discovered (needs_setup + not
+ * enabled) tiles read as “Detected — click to install” instead of “Setup needed”.
  */
 export function integrationView(
   adapter: AdapterStatus,
   sessions: SessionStatus[],
+  options?: { enabled?: boolean },
 ): IntegrationView {
   const journalApp = journalAppFor(adapter.id);
   const presence = journalApp
@@ -153,6 +157,16 @@ export function integrationView(
         presence.count === 1
           ? "1 thread auto-detected — enable for controls."
           : `${presence.count} threads auto-detected — enable for controls.`,
+      connectedGroup: false,
+    };
+  }
+
+  // Auto-discovered on disk but not yet enabled/installed via first click.
+  if (adapter.state === "needs_setup" && options?.enabled === false) {
+    return {
+      light: "yellow",
+      label: "Detected — click to install",
+      diagnostic: adapter.diagnostic,
       connectedGroup: false,
     };
   }
