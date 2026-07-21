@@ -7,12 +7,14 @@ import {
 
 function TileFace({
   name,
+  iconSrc,
   diagnostic,
   light,
   label,
   theme,
 }: {
   name: string;
+  iconSrc?: string;
   diagnostic: string;
   light: TrafficLight;
   label: string;
@@ -21,17 +23,37 @@ function TileFace({
   const colors = TRAFFIC_COLORS[light];
   return (
     <>
-      <span
-        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: colors.dot }}
-        aria-hidden
-      />
+      <div className="flex w-full items-start justify-between gap-1">
+        {iconSrc ? (
+          <img
+            src={iconSrc}
+            alt=""
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0 rounded-[7px]"
+            draggable={false}
+          />
+        ) : (
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[11px] font-semibold"
+            style={{ backgroundColor: theme.hoverBg, color: theme.textSecondary }}
+            aria-hidden
+          >
+            {name.slice(0, 1)}
+          </span>
+        )}
+        <span
+          className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ backgroundColor: colors.dot }}
+          aria-hidden
+        />
+      </div>
       <div className="min-w-0 w-full">
-        <div className="truncate text-[12.5px] font-semibold leading-tight">
+        <div className="truncate text-[11px] font-semibold leading-tight">
           {name}
         </div>
         <div
-          className="mt-1 truncate text-[10px] font-medium"
+          className="mt-0.5 truncate text-[9.5px] font-medium leading-tight"
           style={{ color: colors.fg }}
         >
           {label}
@@ -39,7 +61,7 @@ function TileFace({
       </div>
       <div
         role="tooltip"
-        className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-20 w-[min(220px,70vw)] -translate-x-1/2 rounded-lg px-2.5 py-2 text-[10.5px] leading-snug opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-20 w-[min(200px,70vw)] -translate-x-1/2 rounded-lg px-2.5 py-2 text-[10.5px] leading-snug opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
         style={{
           backgroundColor: theme.name === "dark" ? "#1C1C1E" : "#FFFFFF",
           border: `1px solid ${theme.hairline}`,
@@ -54,6 +76,7 @@ function TileFace({
 
 export function IntegrationCard({
   name,
+  iconSrc,
   diagnostic,
   light,
   label,
@@ -63,6 +86,7 @@ export function IntegrationCard({
   onSelect,
 }: {
   name: string;
+  iconSrc?: string;
   diagnostic: string;
   light: TrafficLight;
   label: string;
@@ -82,12 +106,16 @@ export function IntegrationCard({
   const face = (
     <TileFace
       name={name}
+      iconSrc={iconSrc}
       diagnostic={diagnostic}
       light={light}
       label={label}
       theme={theme}
     />
   );
+
+  const className =
+    "group relative flex h-[72px] w-full flex-col items-stretch justify-between rounded-xl px-2 py-1.5 text-left transition-colors";
 
   return (
     <li className="relative list-none">
@@ -98,7 +126,7 @@ export function IntegrationCard({
           title={diagnostic}
           aria-label={`${name}: ${label}. ${diagnostic}`}
           aria-expanded={expandable ? expanded : undefined}
-          className="group relative flex aspect-square w-full flex-col items-start justify-between rounded-2xl p-3 text-left transition-colors"
+          className={className}
           style={shellStyle}
         >
           {face}
@@ -107,7 +135,7 @@ export function IntegrationCard({
         <div
           title={diagnostic}
           aria-label={`${name}: ${label}. ${diagnostic}`}
-          className="group relative flex aspect-square w-full flex-col items-start justify-between rounded-2xl p-3"
+          className={className}
           style={shellStyle}
         >
           {face}
@@ -119,11 +147,13 @@ export function IntegrationCard({
 
 export function IntegrationDetail({
   name,
+  iconSrc,
   diagnostic,
   theme,
   children,
 }: {
   name: string;
+  iconSrc?: string;
   diagnostic: string;
   theme: ThemeTokens;
   children?: ReactNode;
@@ -136,7 +166,19 @@ export function IntegrationDetail({
         border: `1px solid ${theme.hairline}`,
       }}
     >
-      <div className="text-[12.5px] font-semibold">{name}</div>
+      <div className="flex items-center gap-2">
+        {iconSrc ? (
+          <img
+            src={iconSrc}
+            alt=""
+            width={22}
+            height={22}
+            className="h-[22px] w-[22px] rounded-[6px]"
+            draggable={false}
+          />
+        ) : null}
+        <div className="text-[12.5px] font-semibold">{name}</div>
+      </div>
       <div className="mt-1 text-[11px]" style={{ color: theme.textSecondary }}>
         {diagnostic}
       </div>

@@ -133,7 +133,8 @@ describe("Settings", () => {
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
     expect(html).toContain("Integrations");
-    expect(html).toContain("grid-cols-2");
+    expect(html).toContain("grid-cols-3");
+    expect(html).toContain("integrations/");
     // Synara waits (yellow) with no sessions; CNVS stays connected.
     expect(html).toContain("Connected · 1");
     expect(html).toContain("Not connected · 2");
@@ -147,6 +148,7 @@ describe("Settings", () => {
     // Cursor is auto-selected as the first actionable not-connected tile.
     expect(html).toContain("Repair bundled integration");
     expect(html).toContain("hover for detail");
+    expect(html).toContain('width="28"');
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");
     expect(html).not.toContain("not production");
