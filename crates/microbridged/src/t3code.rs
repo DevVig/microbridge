@@ -24,8 +24,11 @@ pub const T3_OWNER: u64 = u64::MAX - 1;
 const KEYCHAIN_SERVICE: &str = "ai.microbridge.t3code";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_ACCOUNT: &str = "paired-environment";
-const SUPPORTED_SERVER_VERSION: &str = "0.0.28";
-const PINNED_CONTRACT_COMMIT: &str = "ebe8afb1df357423a0e036b388af3e739d640205";
+/// Base server versions whose paired HTTP orchestration contract Microbridge
+/// has verified. Nightly builds of these bases (`0.0.29-nightly.…`) are also
+/// accepted — T3 ships nightlies with the same shell/dispatch surface.
+const SUPPORTED_SERVER_VERSIONS: &[&str] = &["0.0.28", "0.0.29"];
+const PINNED_CONTRACT_COMMIT: &str = "5d34f9ff235115d43a6cb4b4561d10badf218b87";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct T3Credential {
@@ -327,7 +330,7 @@ pub fn spawn(
                                     format!(
                                         "T3 Code server {} is incompatible with Microbridge's pinned {} contract ({}). Update Microbridge before reconnecting.",
                                         descriptor.server_version,
-                                        SUPPORTED_SERVER_VERSION,
+                                        SUPPORTED_SERVER_VERSIONS.join(" / "),
                                         &PINNED_CONTRACT_COMMIT[..12],
                                     ),
                                 );
@@ -427,7 +430,12 @@ async fn fetch_descriptor(
 }
 
 fn contract_is_supported(server_version: &str) -> bool {
-    server_version == SUPPORTED_SERVER_VERSION
+    SUPPORTED_SERVER_VERSIONS.iter().any(|base| {
+        server_version == *base
+            || server_version
+                .strip_prefix(base)
+                .is_some_and(|rest| rest.starts_with("-nightly."))
+    })
 }
 
 async fn fetch_shell(
@@ -728,9 +736,13 @@ mod tests {
     #[test]
     fn pins_the_supported_t3_contract_version() {
         assert!(contract_is_supported("0.0.28"));
-        assert!(!contract_is_supported("0.0.28-nightly.1"));
+        assert!(contract_is_supported("0.0.28-nightly.1"));
+        assert!(contract_is_supported("0.0.29"));
+        assert!(contract_is_supported("0.0.29-nightly.20260720.859"));
         assert!(!contract_is_supported("0.0.27"));
-        assert!(!contract_is_supported("0.0.29"));
+        assert!(!contract_is_supported("0.0.30"));
+        assert!(!contract_is_supported("0.0.290"));
+        assert!(!contract_is_supported("0.0.29-beta.1"));
         assert_eq!(PINNED_CONTRACT_COMMIT.len(), 40);
     }
 

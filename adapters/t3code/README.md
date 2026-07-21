@@ -21,8 +21,9 @@ Microbridge uses T3 Code's authenticated public endpoints:
 
 It never reads T3 Code databases, bootstrap credentials, or desktop internals.
 
-The compatibility suite is pinned to T3 server `0.0.28` and upstream contract
-commit `ebe8afb1df357423a0e036b388af3e739d640205`. Other server versions are
+The compatibility suite is pinned to T3 server bases `0.0.28` and `0.0.29`
+(including `*-nightly.…` builds of those bases) against upstream contract
+commit `5d34f9ff235115d43a6cb4b4561d10badf218b87`. Other server versions are
 reported as **Incompatible** until Microbridge verifies and ships their contract.
 The adapter opens threads with T3 Code's semantic deep link. Reasoning effort
 stays disabled because the current paired HTTP snapshot includes the selected
@@ -30,6 +31,7 @@ value but not the provider/model option descriptors needed to choose the next
 valid level safely. Microbridge does not fake this with key presses or private
 desktop state.
 
-The compatibility target is the contract present in `pingdotgg/t3code` as of
-July 18, 2026. Authentication failures return to **Needs setup**; transport
-failures show **Connecting** and retry with the existing paired credential.
+The compatibility target is the orchestration shell/dispatch contract present
+in `pingdotgg/t3code` as of July 20, 2026. Authentication failures return to
+**Needs setup**; transport failures show **Connecting** and retry with the
+existing paired credential.
