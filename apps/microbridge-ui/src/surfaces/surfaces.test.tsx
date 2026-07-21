@@ -118,7 +118,7 @@ describe("Settings", () => {
     expect(html).toContain("Reset to Codex Defaults");
   });
 
-  it("renders unified integration state and capability limits", () => {
+  it("renders integration tiles with status and a setup detail panel", () => {
     const html = renderToStaticMarkup(
       <Settings
         snapshot={snapshot()}
@@ -133,6 +133,7 @@ describe("Settings", () => {
     expect(html).toContain("Lifecycle is connected");
     expect(html).toContain("Live state");
     expect(html).toContain("Integrations");
+    expect(html).toContain("grid-cols-2");
     // Synara waits (yellow) with no sessions; CNVS stays connected.
     expect(html).toContain("Connected · 1");
     expect(html).toContain("Not connected · 2");
@@ -140,11 +141,12 @@ describe("Settings", () => {
     expect(html).toContain("Synara");
     expect(html).toContain("no separate adapter needed");
     expect(html).toContain("Connected across 3 exact canvas terminal targets");
-    expect(html).toContain("✓ Open");
+    expect(html).toContain("✓ Live state");
+    expect(html).toContain("— Open");
     expect(html).toContain("Interrupt");
-    expect(html).toContain("OpenCode uses its official");
+    // Cursor is auto-selected as the first actionable not-connected tile.
     expect(html).toContain("Repair bundled integration");
-    expect(html).toContain("Green means live");
+    expect(html).toContain("hover for detail");
     expect(html).not.toContain("Install managed plugin");
     expect(html).not.toContain("scaffold only");
     expect(html).not.toContain("not production");
