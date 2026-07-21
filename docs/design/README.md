@@ -131,10 +131,11 @@ Keyboard setup. Four sections in a left rail:
 - **Agent Keys** — live "six keys, six threads" view, key source, deck focus
   mode (auto/pinned), app priority order, approvals-interrupt toggle (policy
   only — no live approve UI)
-- **Integrations** — one card per supported app, grouped by connected / not
-  connected, with green / yellow / red status. Host-attributed apps (Synara,
-  ChatGPT, Claude Desktop, Conductor) are status-only; enable / repair /
-  disconnect / remove apply only to session sources that need them
+- **Integrations** — compact square tile grid (2–3 columns), grouped by
+  connected / not connected. Each tile always shows name + traffic-light status;
+  hover reveals the diagnostic. Click Cursor / Factory / T3 / OpenCode to open a
+  detail strip for enable / repair / pair. Host-attributed apps (Synara,
+  ChatGPT, Claude Desktop, Conductor) are status + hover only
 - **Device** — Appearance (System/Light/Dark), Lighting (Codex defaults +
   Phosphor preset + reset), brightness, LED test, sleep timer (default 3 min),
   firmware, zero-network note

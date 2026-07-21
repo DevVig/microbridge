@@ -26,8 +26,15 @@ import {
   launchAtLoginEnabled,
   setLaunchAtLogin,
 } from "../lib/autostart";
-import { IntegrationCard } from "../components/IntegrationCard";
-import { TRAFFIC_COLORS, integrationView } from "../lib/hosts";
+import {
+  IntegrationCard,
+  IntegrationDetail,
+} from "../components/IntegrationCard";
+import {
+  TRAFFIC_COLORS,
+  integrationView,
+  isHostAttributed,
+} from "../lib/hosts";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -126,6 +133,9 @@ export function Settings({
   const [pairingUrl, setPairingUrl] = useState("");
   const [adapterMessage, setAdapterMessage] = useState<string | null>(null);
   const [adapterBusy, setAdapterBusy] = useState<Set<string>>(() => new Set());
+  const [selectedIntegration, setSelectedIntegration] = useState<string | null>(
+    null,
+  );
   // null until the login item has been read, and permanently null where a login
   // item is meaningless: outside Tauri, or in a dev build whose executable path
   // points into `target/debug`.
@@ -602,6 +612,8 @@ export function Settings({
             .map((adapter) => ({
               adapter,
               view: integrationView(adapter, snapshot.sessions),
+              actionable:
+                adapter.kind === "community" && !isHostAttributed(adapter.id),
             }));
           const groups = [
             {
@@ -615,22 +627,28 @@ export function Settings({
               items: views.filter((item) => !item.view.connectedGroup),
             },
           ];
+          const selectable = views.filter((item) => item.actionable);
+          const activeId =
+            selectedIntegration &&
+            selectable.some((item) => item.adapter.id === selectedIntegration)
+              ? selectedIntegration
+              : (selectable.find((item) => !item.view.connectedGroup)?.adapter
+                  .id ??
+                selectable[0]?.adapter.id ??
+                null);
+          const selected = views.find((item) => item.adapter.id === activeId);
           return (
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Every supported app is its own card. Green means live threads or a
-              healthy watcher; yellow means waiting or setup; red means error.
-              ChatGPT, Claude Desktop, Synara, Conductor, and CNVS are built in.
-              Cursor, Factory, T3 Code, and OpenCode connect after you enable them.
+              Each app is a tile. Green / yellow / red is always visible; hover
+              for detail. Click Cursor, Factory, T3 Code, or OpenCode to enable
+              or repair.
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              Synara and the desktop apps share Claude/Codex journals — they do
-              not need a separate adapter. CNVS-hosted terminals replace matching
-              raw journal cards while CNVS owns them. OpenCode uses its official
-              global plugin API. For T3 controls, enable Network access in T3 Code
-              Settings → Connections, create a link under Authorized clients, then
-              paste it below. Factory hooks are merged without replacing yours.
+              Synara and the desktop apps share Claude/Codex journals — no
+              separate adapter. For T3 controls, enable Network access in T3 Code
+              Settings → Connections, then paste a pairing link below.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
@@ -643,32 +661,51 @@ export function Settings({
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.items.length ? TRAFFIC_COLORS[group.light].dot : t.textMuted }} />
                   {group.label} · {group.items.length}
                 </div>
-                <ul className="mt-2 space-y-3">
-              {group.items.map(({ adapter, view }) => (
+                <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {group.items.map(({ adapter, view, actionable }) => (
                 <IntegrationCard
                   key={adapter.id}
                   name={adapter.display_name}
-                  badge={adapter.kind}
                   diagnostic={view.diagnostic}
                   light={view.light}
                   label={view.label}
                   theme={t}
-                >
+                  expandable={actionable}
+                  expanded={actionable && adapter.id === activeId}
+                  onSelect={
+                    actionable
+                      ? () =>
+                          setSelectedIntegration((current) =>
+                            current === adapter.id ? current : adapter.id,
+                          )
+                      : undefined
+                  }
+                />
+              ))}
+                </ul>
+              </div>
+            ))}
+            {selected && (
+              <IntegrationDetail
+                name={selected.adapter.display_name}
+                diagnostic={selected.view.diagnostic}
+                theme={t}
+              >
                   <div className="mt-2 flex flex-wrap gap-1">
                     {CAPABILITIES.map((capability) => (
                       <span
                         key={capability.id}
                         className="rounded-full px-2 py-0.5 text-[9.5px]"
                         style={{
-                          backgroundColor: adapter.capabilities[capability.id] ? "#30C46316" : t.hoverBg,
-                          color: adapter.capabilities[capability.id] ? "#278B48" : t.textMuted,
+                          backgroundColor: selected.adapter.capabilities[capability.id] ? "#30C46316" : t.hoverBg,
+                          color: selected.adapter.capabilities[capability.id] ? "#278B48" : t.textMuted,
                         }}
                       >
-                        {adapter.capabilities[capability.id] ? "✓ " : "— "}{capability.label}
+                        {selected.adapter.capabilities[capability.id] ? "✓ " : "— "}{capability.label}
                       </span>
                     ))}
                   </div>
-                  {adapter.id === "t3code" && adapter.state !== "disabled" && (
+                  {selected.adapter.id === "t3code" && selected.adapter.state !== "disabled" && (
                     <div className="mt-3 flex max-w-xl gap-2">
                       <input
                         type="password"
@@ -680,12 +717,12 @@ export function Settings({
                       />
                       <button
                         type="button"
-                        disabled={!pairingUrl.trim() || adapterBusy.has(adapter.id)}
+                        disabled={!pairingUrl.trim() || adapterBusy.has(selected.adapter.id)}
                         className="rounded-lg px-3 py-1.5 text-[11px] font-medium disabled:opacity-40"
                         style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
                         onClick={() =>
-                          void runAdapterOperation(adapter.id, async () => {
-                            const message = await pairAdapter(adapter.id, pairingUrl.trim());
+                          void runAdapterOperation(selected.adapter.id, async () => {
+                            const message = await pairAdapter(selected.adapter.id, pairingUrl.trim());
                             setPairingUrl("");
                             return message;
                           })
@@ -696,35 +733,35 @@ export function Settings({
                     </div>
                   )}
                   <div className="mt-3 flex gap-2">
-                    {adapter.kind === "community" && !cfg.adapters[adapter.id]?.enabled && (
+                    {selected.adapter.kind === "community" && !cfg.adapters[selected.adapter.id]?.enabled && (
                       <button
                         type="button"
-                        disabled={adapterBusy.has(adapter.id)}
+                        disabled={adapterBusy.has(selected.adapter.id)}
                         className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
                         style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
                         onClick={() =>
-                          void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, true))
+                          void runAdapterOperation(selected.adapter.id, () => setAdapterEnabled(selected.adapter.id, true))
                         }
                       >
-                        {adapter.id === "cursor"
+                        {selected.adapter.id === "cursor"
                           ? "Enable Cursor"
-                          : adapter.id === "factory"
+                          : selected.adapter.id === "factory"
                             ? "Enable Factory"
-                            : adapter.id === "opencode"
+                            : selected.adapter.id === "opencode"
                               ? "Enable OpenCode"
                             : "Enable integration"}
                       </button>
                     )}
-                    {adapter.kind === "community" && cfg.adapters[adapter.id]?.enabled && (
+                    {selected.adapter.kind === "community" && cfg.adapters[selected.adapter.id]?.enabled && (
                       <>
-                        {(adapter.id === "cursor" || adapter.id === "factory" || adapter.id === "opencode") && (
+                        {(selected.adapter.id === "cursor" || selected.adapter.id === "factory" || selected.adapter.id === "opencode") && (
                           <button
                             type="button"
-                            disabled={adapterBusy.has(adapter.id)}
+                            disabled={adapterBusy.has(selected.adapter.id)}
                             className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
                             style={{ backgroundColor: t.hoverBg, border: `1px solid ${t.hairline}` }}
                             onClick={() =>
-                              void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, true))
+                              void runAdapterOperation(selected.adapter.id, () => setAdapterEnabled(selected.adapter.id, true))
                             }
                           >
                             Repair bundled integration
@@ -732,22 +769,22 @@ export function Settings({
                         )}
                         <button
                           type="button"
-                          disabled={adapterBusy.has(adapter.id)}
+                          disabled={adapterBusy.has(selected.adapter.id)}
                           className="rounded-lg px-3 py-1.5 text-[11px]"
                           style={{ border: `1px solid ${t.hairline}`, color: t.textSecondary }}
                           onClick={() =>
-                            void runAdapterOperation(adapter.id, () => setAdapterEnabled(adapter.id, false))
+                            void runAdapterOperation(selected.adapter.id, () => setAdapterEnabled(selected.adapter.id, false))
                           }
                         >
                           Disconnect
                         </button>
                         <button
                           type="button"
-                          disabled={adapterBusy.has(adapter.id)}
+                          disabled={adapterBusy.has(selected.adapter.id)}
                           className="rounded-lg px-3 py-1.5 text-[11px]"
                           style={{ border: `1px solid ${t.hairline}`, color: t.textSecondary }}
                           onClick={() =>
-                            void runAdapterOperation(adapter.id, () => forgetAdapter(adapter.id))
+                            void runAdapterOperation(selected.adapter.id, () => forgetAdapter(selected.adapter.id))
                           }
                         >
                           Remove
@@ -755,11 +792,8 @@ export function Settings({
                       </>
                     )}
                   </div>
-                </IntegrationCard>
-              ))}
-                </ul>
-              </div>
-            ))}
+              </IntegrationDetail>
+            )}
           </section>
           );
         })()}
