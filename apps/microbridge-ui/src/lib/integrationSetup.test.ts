@@ -30,6 +30,21 @@ describe("integrationGuidance", () => {
     expect(setup?.primaryAction).toBe("open_app");
   });
 
+  it("treats connected Cursor as lifecycle success, not broken Limited", () => {
+    const connected = integrationGuidance("cursor", "connected");
+    expect(connected?.title).toContain("connected");
+    expect(connected?.steps.some((step) => /ACP|lifecycle/i.test(step))).toBe(
+      true,
+    );
+  });
+
+  it("guides Cursor ACP separately from IDE Composer", () => {
+    const acp = integrationGuidance("cursor_acp", "needs_setup", {
+      enabled: true,
+    });
+    expect(acp?.steps.some((step) => step.includes("CLI"))).toBe(true);
+  });
+
   it("treats auto-discovered needs_setup + disabled as install CTA", () => {
     const detected = integrationGuidance("cursor", "needs_setup", {
       enabled: false,
@@ -51,7 +66,7 @@ describe("integrationGuidance", () => {
     const synara = integrationGuidance("synara", "connected", {
       label: "Idle",
     });
-    expect(synara?.steps[0]).toContain("Idle is normal");
+    expect(synara?.steps[0]).toContain("Ready/Idle is normal");
   });
 
   it("explains always-on Codex/Claude watchers", () => {

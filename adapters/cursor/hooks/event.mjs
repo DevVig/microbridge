@@ -4,6 +4,7 @@ const LIFECYCLE_STATES = {
   idle: "idle",
   stop: "idle",
   session_end: "idle",
+  session_start: "thinking",
   thinking: "thinking",
   before_submit_prompt: "thinking",
   after_agent_thought: "thinking",

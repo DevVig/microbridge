@@ -134,13 +134,13 @@ describe("Settings", () => {
     expect(html).toContain("Integrations");
     expect(html).toContain("grid-cols-3");
     expect(html).toContain("integrations/");
-    // CNVS connected + Cursor limited; Synara idle with no sessions.
-    expect(html).toContain("Connected · 2");
-    expect(html).toContain("Not connected · 1");
-    expect(html).toContain("Idle");
+    // CNVS connected + Cursor lifecycle + Synara ready (idle hosts stay Connected).
+    expect(html).toContain("Connected · 3");
+    expect(html).toContain("Not connected · 0");
+    expect(html).toContain("Ready · idle");
     expect(html).not.toContain(">Waiting<");
     expect(html).toContain("Synara");
-    expect(html).toContain("no separate adapter needed");
+    expect(html).toContain("waiting for sessions (setup is fine)");
     expect(html).toContain("Connected across 3 exact canvas terminal targets");
     // No phantom selection until the user clicks a tile.
     expect(html).toContain("Select a tile for details.");
@@ -197,7 +197,7 @@ describe("Settings", () => {
     // Still no detail until click — selection is user-driven.
     expect(html).toContain("Select a tile for details.");
     expect(html).toContain("Setup needed");
-    expect(html).toContain("Not connected · 2");
+    expect(html).toContain("Not connected · 1");
   });
 
   it("shows Synara as Active when sessions are attributed", () => {

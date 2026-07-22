@@ -6,10 +6,13 @@
 
 use std::sync::Arc;
 
-use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, AdapterEvent};
+use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, spawn_cursor_adapter, AdapterEvent};
 use mb_device::open_default_device_with_claim;
+use microbridged::claude_control::{self, CLAUDE_OWNER};
 use microbridged::cnvs::{self, CNVS_OWNER};
+use microbridged::codex_control::{self, CODEX_OWNER};
 use microbridged::config::load_config;
+use microbridged::cursor_acp::{self, CURSOR_ACP_OWNER};
 use microbridged::factory::{self, FACTORY_OWNER};
 use microbridged::frontmost::spawn_frontmost_watcher;
 use microbridged::socket::serve;
@@ -38,6 +41,9 @@ async fn main() -> std::io::Result<()> {
     let (t3_action_tx, t3_action_rx) = mpsc::unbounded_channel();
     let (factory_action_tx, factory_action_rx) = mpsc::unbounded_channel();
     let (cnvs_action_tx, cnvs_action_rx) = mpsc::unbounded_channel();
+    let (cursor_acp_action_tx, cursor_acp_action_rx) = mpsc::unbounded_channel();
+    let (codex_action_tx, codex_action_rx) = mpsc::unbounded_channel();
+    let (claude_action_tx, claude_action_rx) = mpsc::unbounded_channel();
     let mut daemon_state = DaemonState::new(device, config);
     daemon_state.install_internal_adapter(T3_OWNER, "t3code", t3code::capabilities(), t3_action_tx);
     daemon_state.install_internal_adapter(
@@ -47,10 +53,31 @@ async fn main() -> std::io::Result<()> {
         factory_action_tx,
     );
     daemon_state.install_internal_adapter(CNVS_OWNER, "cnvs", cnvs::capabilities(), cnvs_action_tx);
+    daemon_state.install_internal_adapter(
+        CURSOR_ACP_OWNER,
+        "cursor_acp",
+        cursor_acp::capabilities(),
+        cursor_acp_action_tx,
+    );
+    daemon_state.install_internal_adapter(
+        CODEX_OWNER,
+        "codex",
+        codex_control::lifecycle_capabilities(),
+        codex_action_tx,
+    );
+    daemon_state.install_internal_adapter(
+        CLAUDE_OWNER,
+        "claude",
+        claude_control::lifecycle_capabilities(),
+        claude_action_tx,
+    );
     let shared = Arc::new(Mutex::new(daemon_state));
     t3code::spawn(Arc::clone(&shared), t3_action_rx);
     factory::spawn(Arc::clone(&shared), factory_action_rx);
     cnvs::spawn(Arc::clone(&shared), cnvs_action_rx);
+    cursor_acp::spawn(Arc::clone(&shared), cursor_acp_action_rx);
+    codex_control::spawn(Arc::clone(&shared), codex_action_rx);
+    claude_control::spawn(Arc::clone(&shared), claude_action_rx);
     microbridged::mcp::spawn_mcp_server(Arc::clone(&shared));
     microbridged::auto_discover::spawn_auto_discovery(Arc::clone(&shared));
 
@@ -69,19 +96,25 @@ async fn main() -> std::io::Result<()> {
 
     let (adapter_tx, mut adapter_rx) = mpsc::unbounded_channel::<AdapterEvent>();
     spawn_codex_adapter(adapter_tx.clone());
-    spawn_claude_adapter(adapter_tx);
+    spawn_claude_adapter(adapter_tx.clone());
+    spawn_cursor_adapter(adapter_tx);
 
     let bus = Arc::clone(&shared);
     tokio::spawn(async move {
         while let Some(event) = adapter_rx.recv().await {
             let mut state = bus.lock().await;
             match event {
-                // conn_id 0 = in-process owner
                 AdapterEvent::Upsert(observed) => {
                     let adapter_id = observed.session.id.split(':').next().unwrap_or_default();
-                    if state.adapter_enabled(adapter_id) {
-                        state.upsert_observed_session(observed, 0);
+                    if !state.adapter_enabled(adapter_id) {
+                        continue;
                     }
+                    let owner = match adapter_id {
+                        "codex" => CODEX_OWNER,
+                        "claude" => CLAUDE_OWNER,
+                        _ => 0,
+                    };
+                    state.upsert_observed_session(observed, owner);
                 }
                 AdapterEvent::Remove(id) => state.remove_observed_session(&id),
             }

@@ -135,12 +135,13 @@ export function integrationView(
         connectedGroup: true,
       };
     }
+    // Healthy watcher with no sessions — Ready, not "Not connected".
     return {
-      light: "yellow",
-      label: "Idle",
+      light: "green",
+      label: "Ready · idle",
       diagnostic:
-        "via Claude & Codex journals — no separate adapter needed. Waiting for sessions.",
-      connectedGroup: false,
+        "via Claude & Codex journals — waiting for sessions (setup is fine).",
+      connectedGroup: true,
     };
   }
 
@@ -172,6 +173,18 @@ export function integrationView(
   }
 
   const light = lightForState(adapter.state);
+  // Lifecycle-only community links (esp. Cursor) should not read as broken Limited.
+  if (
+    adapter.state === "limited" &&
+    adapter.capabilities.lifecycle_observation
+  ) {
+    return {
+      light: "green",
+      label: "Connected · lifecycle",
+      diagnostic: adapter.diagnostic,
+      connectedGroup: true,
+    };
+  }
   return {
     light,
     label: STATE_LABELS[adapter.state],

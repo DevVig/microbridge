@@ -47,6 +47,31 @@ body,
   animation: mb-led-breathe 2.4s ease-in-out infinite;
 }
 
+@keyframes mb-status-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.mb-status-pulse {
+  animation: mb-status-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-led-pulse,
+  .mb-led-breathe,
+  .mb-status-pulse,
+  .mb-drain {
+    animation: none !important;
+  }
+}
+
 @keyframes mb-drain {
   from {
     transform: scaleX(1);

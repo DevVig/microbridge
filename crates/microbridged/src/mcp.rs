@@ -19,8 +19,17 @@ use tracing::{info, warn};
 
 use crate::state::DaemonState;
 
-pub const MCP_OWNER: u64 = u64::MAX - 4;
+/// Distinct from Cursor ACP (`u64::MAX - 4`).
+pub const MCP_OWNER: u64 = u64::MAX - 5;
 pub const MCP_PORT: u16 = 9190;
+
+/// Opt-in only — idle TCP bind is skipped unless `MICROBRIDGE_MCP=1`.
+pub fn mcp_enabled_by_env() -> bool {
+    matches!(
+        std::env::var("MICROBRIDGE_MCP").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
 
 pub fn capabilities() -> AdapterCapabilities {
     AdapterCapabilities {
@@ -54,6 +63,10 @@ struct JsonRpcResponse {
 }
 
 pub fn spawn_mcp_server(shared: Arc<Mutex<DaemonState>>) {
+    if !mcp_enabled_by_env() {
+        info!("Embedded MCP server dormant (set MICROBRIDGE_MCP=1 to enable)");
+        return;
+    }
     tokio::spawn(async move {
         let addr = SocketAddr::from(([127, 0, 0, 1], MCP_PORT));
         let listener = match TcpListener::bind(&addr).await {

@@ -24,11 +24,16 @@ Microbridge app.
 
 ## Capability boundary
 
-Lifecycle observation is implemented. Cursor does not currently expose stable
-public APIs for authoritative approval acceptance, session-scoped interrupt,
-opening an existing thread, or reasoning-effort changes. Microbridge therefore
-reports this adapter as **Limited** and never falls back to private storage or
-Accessibility scripting.
+Lifecycle observation is implemented (hooks + optional transcript watch). Cursor
+IDE does not currently expose stable public APIs for authoritative approval
+acceptance, session-scoped interrupt of the composer, opening an existing
+thread by id, or reasoning-effort changes. Microbridge therefore reports the
+IDE Composer tile as **Connected** for lifecycle (same ceiling as Claude Code)
+and never falls back to private storage or Accessibility scripting.
+
+For hardware-driven approve / interrupt / new session against **Microbridge-owned**
+Cursor agents, enable **Cursor Agent (ACP)** and install the Cursor CLI
+(`agent` / `cursor-agent`). See [../cursor-acp/README.md](../cursor-acp/README.md).
 
 Run a hook locally:
 

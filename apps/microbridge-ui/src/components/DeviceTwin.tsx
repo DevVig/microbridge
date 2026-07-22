@@ -137,7 +137,7 @@ function AgentKeycap({
   const pulse =
     session?.state === "awaiting_approval"
       ? "mb-led-pulse"
-      : session?.state === "thinking"
+      : session?.state === "thinking" || session?.state === "working"
         ? "mb-led-breathe"
         : "";
 

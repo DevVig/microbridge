@@ -523,6 +523,82 @@ fn sync_factory_integration(synced: &AtomicBool, enabled: bool) {
     }
 }
 
+/// Install Claude PermissionRequest hooks under ~/.microbridge/claude-hooks
+/// and merge into ~/.claude/settings.json (idempotent, lean — only writes when needed).
+fn install_claude_hooks() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is unset".to_string())?;
+    let hook_dir = PathBuf::from(&home).join(".microbridge").join("claude-hooks");
+    fs::create_dir_all(&hook_dir).map_err(|e| e.to_string())?;
+    let dest = hook_dir.join("microbridge-permission.mjs");
+    let source_candidates = [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../adapters/claude/hooks/microbridge-permission.mjs"),
+        PathBuf::from(&home)
+            .join("dev/t3PRHelp/adapters/claude/hooks/microbridge-permission.mjs"),
+    ];
+    let source = source_candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| "Claude hook script not found in the Microbridge bundle.".to_string())?;
+    let body = fs::read_to_string(&source).map_err(|e| e.to_string())?;
+    if fs::read_to_string(&dest).ok().as_deref() != Some(body.as_str()) {
+        fs::write(&dest, &body).map_err(|e| e.to_string())?;
+    }
+    let command = format!(
+        "node \"{}\" permission",
+        dest.to_string_lossy().replace('"', "\\\"")
+    );
+    let pretool = format!(
+        "node \"{}\" pretool",
+        dest.to_string_lossy().replace('"', "\\\"")
+    );
+    let settings_path = PathBuf::from(&home).join(".claude").join("settings.json");
+    let mut settings = if settings_path.is_file() {
+        let text = fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let hooks = settings
+        .as_object_mut()
+        .ok_or_else(|| "Claude settings.json root must be an object".to_string())?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks_obj = hooks
+        .as_object_mut()
+        .ok_or_else(|| "Claude settings hooks must be an object".to_string())?;
+    let permission_entry = serde_json::json!([{
+        "hooks": [{ "type": "command", "command": command }]
+    }]);
+    let pretool_entry = serde_json::json!([{
+        "hooks": [{ "type": "command", "command": pretool }]
+    }]);
+    let mut changed = false;
+    if hooks_obj.get("PermissionRequest") != Some(&permission_entry) {
+        hooks_obj.insert("PermissionRequest".into(), permission_entry);
+        changed = true;
+    }
+    if hooks_obj.get("PreToolUse") != Some(&pretool_entry) {
+        // Merge carefully: only replace if empty or already Microbridge-owned.
+        let existing = hooks_obj.get("PreToolUse").cloned().unwrap_or(serde_json::json!([]));
+        let text = existing.to_string();
+        if text.contains("microbridge-permission") || existing.as_array().is_some_and(|a| a.is_empty()) {
+            hooks_obj.insert("PreToolUse".into(), pretool_entry);
+            changed = true;
+        }
+    }
+    if changed {
+        write_json_atomic(&settings_path, &settings)?;
+    }
+    Ok(dest)
+}
+
+fn sync_claude_hooks(synced: &AtomicBool) {
+    if !synced.swap(true, Ordering::Relaxed) && install_claude_hooks().is_err() {
+        synced.store(false, Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod factory_integration_tests {
     use super::*;
@@ -1289,6 +1365,8 @@ pub fn run() {
             let cursor_sync_loop = Arc::clone(&cursor_integration_synced);
             let factory_integration_synced = Arc::new(AtomicBool::new(false));
             let factory_sync_loop = Arc::clone(&factory_integration_synced);
+            let claude_hooks_synced = Arc::new(AtomicBool::new(false));
+            let claude_sync_loop = Arc::clone(&claude_hooks_synced);
             let opencode_integration_synced = Arc::new(AtomicBool::new(false));
             let opencode_sync_loop = Arc::clone(&opencode_integration_synced);
 
@@ -1312,6 +1390,15 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(false);
                             sync_factory_integration(&factory_sync_loop, factory_enabled);
+                            let claude_enabled = s
+                                .config
+                                .adapters
+                                .get("claude")
+                                .map(|preference| preference.enabled)
+                                .unwrap_or(true);
+                            if claude_enabled {
+                                sync_claude_hooks(&claude_sync_loop);
+                            }
                             let opencode_enabled = s
                                 .config
                                 .adapters

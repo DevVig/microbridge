@@ -73,7 +73,7 @@ export function integrationGuidance(
           steps: [
             "Click this tile to install the bundled Cursor plugin.",
             "Reload Cursor’s window (or quit and reopen) so hooks load.",
-            "Use Cursor — Microbridge turns Limited/Connected after lifecycle events arrive.",
+            "Use Cursor — Microbridge turns Connected once lifecycle events arrive.",
           ],
           primaryAction: "enable",
         };
@@ -84,17 +84,21 @@ export function integrationGuidance(
           steps: [
             "Reload Cursor’s window (or quit and reopen Cursor) so the bundled hooks load.",
             "Open or continue a Cursor agent thread so Microbridge receives lifecycle events.",
-            "Expect Limited (lifecycle) or Connected once hooks are talking to the daemon.",
+            "Expect Connected once hooks are talking to the daemon (approve/interrupt need Cursor ACP).",
           ],
           primaryAction: "open_app",
         };
       }
-      if (state === "limited") {
+      if (state === "limited" || state === "connected") {
         return {
-          title: "Cursor is partially connected",
+          title:
+            state === "connected"
+              ? "Cursor lifecycle is connected"
+              : "Cursor lifecycle is live",
           steps: [
-            "Lifecycle is live — approve/reject and interrupt may be limited by Cursor’s capabilities.",
-            "Keep using Cursor; Microbridge will show threads as they appear.",
+            "Lifecycle observation matches Claude Code’s ceiling for the IDE composer.",
+            "Approve, interrupt, and open-conversation control need Cursor ACP/SDK (Microbridge-owned agents) — not available for the IDE composer yet.",
+            "Keep using Cursor; threads appear as hooks and transcript watches fire.",
           ],
           primaryAction: "open_app",
         };
@@ -191,6 +195,41 @@ export function integrationGuidance(
       }
       return null;
 
+    case "cursor_acp":
+      if (state === "disabled") {
+        return {
+          title: "Enable Cursor Agent (ACP)",
+          steps: [
+            "Install the Cursor CLI so `agent` or `cursor-agent` is on PATH.",
+            "Click this tile to enable ACP control for Microbridge-owned agents.",
+            "This does not remote-control the IDE Composer — use the Cursor tile for that lifecycle.",
+          ],
+          primaryAction: "enable",
+        };
+      }
+      if (state === "needs_setup" || state === "connecting") {
+        return {
+          title: "Install Cursor CLI",
+          steps: [
+            "Install/authenticate the Cursor CLI (`agent` / `cursor-agent`).",
+            "Restart Microbridge after PATH updates, then use New Session / Interrupt from hardware or UI.",
+          ],
+          primaryAction: "none",
+        };
+      }
+      if (state === "connected" || state === "limited") {
+        return {
+          title: "ACP control ready",
+          steps: [
+            "New Session starts a Microbridge-owned ACP agent.",
+            "Interrupt / Approve / Reject map to ACP session methods.",
+            "IDE Composer chats stay on the Cursor tile (lifecycle only).",
+          ],
+          primaryAction: "none",
+        };
+      }
+      return null;
+
     case "cnvs":
       if (state === "needs_setup" || state === "disabled") {
         return {
@@ -253,11 +292,16 @@ export function integrationGuidance(
             : adapterId === "claude_desktop"
               ? "Claude Desktop"
               : "Conductor";
-      if (label === "Idle" || state === "connected" || state === "limited") {
+      if (
+        label === "Idle" ||
+        label === "Ready · idle" ||
+        state === "connected" ||
+        state === "limited"
+      ) {
         return {
           title: `${hostName} via journals`,
           steps: [
-            `Idle is normal — start ${hostName} (or use Claude/Codex through it).`,
+            `Ready/Idle is normal — start ${hostName} (or use Claude/Codex through it).`,
             "Sessions appear automatically from Claude & Codex journals; no separate adapter or pairing.",
           ],
           primaryAction: "none",

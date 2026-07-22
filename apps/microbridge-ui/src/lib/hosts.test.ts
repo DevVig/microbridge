@@ -54,14 +54,14 @@ describe("integrationView", () => {
     expect(view.diagnostic).toContain("no separate adapter");
   });
 
-  it("marks Synara idle when there are no sessions", () => {
+  it("marks Synara ready when there are no sessions", () => {
     const view = integrationView(
       adapter({ id: "synara", display_name: "Synara", state: "connected" }),
       [],
     );
-    expect(view.light).toBe("yellow");
-    expect(view.label).toBe("Idle");
-    expect(view.connectedGroup).toBe(false);
+    expect(view.label).toBe("Ready · idle");
+    expect(view.light).toBe("green");
+    expect(view.connectedGroup).toBe(true);
   });
 
   it("flags disabled Cursor when journal sessions already exist", () => {
@@ -96,10 +96,20 @@ describe("integrationView", () => {
         kind: "community",
         state: "limited",
         diagnostic: "Lifecycle is connected; unsupported IDE commands remain disabled.",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: false,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
       }),
       [],
     );
-    expect(view.label).toBe("Limited");
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.light).toBe("green");
     expect(view.connectedGroup).toBe(true);
   });
 

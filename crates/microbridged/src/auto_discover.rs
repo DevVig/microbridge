@@ -66,11 +66,10 @@ pub fn scan_runtimes() -> Vec<DiscoveredRuntime> {
             id: "opencode",
             name: "OpenCode",
             installed: opencode_installed,
+            // Plugin currently implements lifecycle + interrupt only.
             capabilities: AdapterCapabilities {
                 lifecycle_observation: true,
                 interrupt: true,
-                approval_acceptance: true,
-                approval_rejection: true,
                 ..AdapterCapabilities::default()
             },
         },

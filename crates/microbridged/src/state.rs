@@ -124,6 +124,16 @@ impl DaemonState {
         {
             self.upsert_session(observed.session, owner);
         }
+        // Transcript watch is Claude-parity for Cursor IDE — promote the tile when
+        // hooks miss events but JSONL activity is flowing.
+        if id.starts_with("cursor:") && self.adapter_enabled("cursor") {
+            self.set_adapter_runtime(
+                "cursor",
+                AdapterConnectionState::Connected,
+                AdapterCapabilities::lifecycle_only(),
+                "Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet.",
+            );
+        }
     }
 
     pub fn remove_observed_session(&mut self, id: &str) {
@@ -401,14 +411,25 @@ impl DaemonState {
             .ok_or_else(|| format!("unknown adapter: {adapter_id}"))?;
         status.state =
             if adapter_id == "cursor" && capabilities != AdapterCapabilities::full_control() {
-                AdapterConnectionState::Limited
+                // Lifecycle-only Cursor IDE hooks are Connected — same observation
+                // ceiling as Claude Code. Approve/interrupt stay off the capability chips.
+                if capabilities.lifecycle_observation {
+                    AdapterConnectionState::Connected
+                } else {
+                    AdapterConnectionState::Limited
+                }
             } else {
                 AdapterConnectionState::Connected
             };
         status.version = version;
         status.last_activity_ms = Some(now_ms());
         status.capabilities = capabilities.clone();
-        status.diagnostic = if status.state == AdapterConnectionState::Limited {
+        status.diagnostic = if adapter_id == "cursor"
+            && !capabilities.approval_acceptance
+            && capabilities.lifecycle_observation
+        {
+            "Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet.".into()
+        } else if status.state == AdapterConnectionState::Limited {
             "Lifecycle is connected. Cursor does not yet expose every hardware command.".into()
         } else {
             "Connected and ready.".into()
@@ -448,7 +469,7 @@ impl DaemonState {
             .adapters
             .get_mut(adapter_id)
             .ok_or_else(|| format!("unknown adapter: {adapter_id}"))?;
-        status.state = if internal_owner.is_some() {
+        status.state = if internal_owner.is_some() || adapter_id == "cursor" {
             AdapterConnectionState::Connected
         } else {
             AdapterConnectionState::Limited
@@ -457,6 +478,8 @@ impl DaemonState {
         status.last_activity_ms = Some(now_ms());
         status.diagnostic = if adapter_id == "factory" {
             "Factory lifecycle, interrupt, and model-aware reasoning effort are connected through official hooks and JSON-RPC.".into()
+        } else if adapter_id == "cursor" {
+            "Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet.".into()
         } else {
             "Lifecycle is connected; unsupported IDE commands remain disabled.".into()
         };
@@ -510,6 +533,10 @@ impl DaemonState {
     ) {
         self.adapter_txs.insert(owner, tx);
         self.adapter_connections.insert(owner, adapter_id.into());
+        self.adapter_capabilities.insert(owner, capabilities);
+    }
+
+    pub fn set_internal_capabilities(&mut self, owner: u64, capabilities: AdapterCapabilities) {
         self.adapter_capabilities.insert(owner, capabilities);
     }
 
@@ -661,14 +688,17 @@ impl DaemonState {
             }
         }
         let Some(tx) = self.adapter_txs.get(&owner) else {
-            // In-process adapters: owner id 0 is reserved for local handlers.
+            // Owner 0 = journal FS watchers. Never report silent success — either a
+            // dedicated control owner owns the session, or the lever is unsupported.
             if owner == 0 {
-                info!(
+                warn!(
                     session_id,
                     ?action,
-                    "in-process action dispatched to local CLI handler"
+                    "journal-observed session has no control plane for this action"
                 );
-                return Ok(());
+                return Err(format!(
+                    "This thread is lifecycle-only — {action:?} is not available until a control plane is attached."
+                ));
             }
             warn!(session_id, ?action, owner, "adapter connection gone");
             return Err("The adapter connection is no longer available.".into());
@@ -823,6 +853,10 @@ fn setup_diagnostic(adapter_id: &str) -> String {
             "The bundled Cursor integration is installed. Reload Cursor once if it is already open."
                 .into()
         }
+        "cursor_acp" => {
+            "Install the Cursor CLI (`agent` / `cursor-agent`) so Microbridge can drive ACP sessions."
+                .into()
+        }
         "t3code" => "Paste a one-time pairing link from T3 Code Settings → Connections.".into(),
         "factory" => "Enable the bundled Factory lifecycle hooks to connect Droid sessions.".into(),
         "opencode" => {
@@ -840,6 +874,7 @@ fn setup_diagnostic(adapter_id: &str) -> String {
 fn reconnect_diagnostic(adapter_id: &str) -> String {
     match adapter_id {
         "cursor" => "Cursor is enabled, but no lifecycle event has arrived yet. Reload Cursor if it was already open.".into(),
+        "cursor_acp" => "Cursor ACP is enabled, but the Cursor CLI is not on PATH yet.".into(),
         "t3code" => "T3 Code is enabled, but its paired connection is offline.".into(),
         "factory" => "Factory is enabled, but no Droid lifecycle event has arrived yet.".into(),
         "opencode" => "OpenCode is enabled, but its integration has not connected yet. Restart OpenCode if it was already running.".into(),
@@ -907,6 +942,10 @@ fn initial_adapter_statuses(config: &DaemonConfig) -> BTreeMap<String, AdapterSt
         ("conductor".into(), native("conductor", "Conductor")),
         ("cnvs".into(), native("cnvs", "CNVS")),
         ("cursor".into(), opt_in("cursor", "Cursor")),
+        (
+            "cursor_acp".into(),
+            opt_in("cursor_acp", "Cursor Agent (ACP)"),
+        ),
         ("t3code".into(), opt_in("t3code", "T3 Code")),
         ("factory".into(), opt_in("factory", "Factory")),
         ("opencode".into(), opt_in("opencode", "OpenCode")),
@@ -1091,6 +1130,19 @@ mod tests {
     }
 
     #[test]
+    fn route_action_rejects_owner_zero_without_control_plane() {
+        let mut state = state();
+        state.upsert_session(session("cursor:one", AgentState::Working), 0);
+        let error = state
+            .route_action("cursor:one", Action::Interrupt)
+            .unwrap_err();
+        assert!(
+            error.contains("lifecycle-only") || error.contains("not available"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn route_action_open_focused_thread_uses_focus_uri() {
         let mut state = state();
         let mut sess = session("cursor:one", AgentState::Working);
@@ -1155,6 +1207,13 @@ mod tests {
         state
             .ingest_lifecycle("cursor", session("cursor:one", AgentState::Done), 5_000)
             .unwrap();
+        assert_eq!(
+            state.adapters["cursor"].state,
+            AdapterConnectionState::Connected
+        );
+        assert!(state.adapters["cursor"]
+            .diagnostic
+            .contains("Lifecycle connected"));
         state.leased_sessions.insert(
             "cursor:one".into(),
             Instant::now() - Duration::from_millis(1),

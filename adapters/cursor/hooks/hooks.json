@@ -1,6 +1,9 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" session_start" }
+    ],
     "beforeSubmitPrompt": [
       { "command": "node \"${CURSOR_PLUGIN_ROOT}/hooks/microbridge-event.mjs\" thinking" }
     ],

@@ -45,7 +45,9 @@ function TileFace({
           </span>
         )}
         <span
-          className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full"
+          className={`mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full${
+            light === "green" || busy ? " mb-status-pulse" : ""
+          }${light === "yellow" && label.toLowerCase().includes("connect") ? " mb-status-pulse" : ""}`}
           style={{ backgroundColor: colors.dot }}
           aria-hidden
         />
@@ -148,12 +150,15 @@ export const IntegrationDetail = forwardRef<
     diagnostic: string;
     theme: ThemeTokens;
     guidance?: { title: string; steps: string[] } | null;
+    /** Healthy connected guidance uses green; setup uses yellow. */
+    guidanceTone?: TrafficLight;
     children?: ReactNode;
   }
 >(function IntegrationDetail(
-  { name, iconSrc, diagnostic, theme, guidance, children },
+  { name, iconSrc, diagnostic, theme, guidance, guidanceTone = "yellow", children },
   ref,
 ) {
+  const tone = TRAFFIC_COLORS[guidanceTone];
   return (
     <div
       ref={ref}
@@ -183,8 +188,8 @@ export const IntegrationDetail = forwardRef<
         <div
           className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
           style={{
-            backgroundColor: TRAFFIC_COLORS.yellow.bg,
-            color: TRAFFIC_COLORS.yellow.fg,
+            backgroundColor: tone.bg,
+            color: tone.fg,
           }}
         >
           <div className="font-medium">{guidance.title}</div>
