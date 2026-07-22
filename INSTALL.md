@@ -7,14 +7,13 @@ runs on your machine.
 ## Recommended on macOS: Homebrew (with updates)
 
 This is the easy path. You do **not** need to clone the repo. Homebrew installs
-the **menu bar app** (primary UI) and the daemon, then owns upgrades and the
-daemon service. This is not a CLI-only product.
+the **menu bar app** (primary UI), its bundled daemon, and the CLI. The explicit
+app helper preserves the signed bundle and avoids a separate background item.
 
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
-brew services start microbridge
-open ~/Applications/Microbridge.app
+microbridge-app install
 microbridgectl status
 ```
 
@@ -22,7 +21,7 @@ microbridgectl status
 
 ```sh
 brew update && brew upgrade microbridge
-brew services restart microbridge
+microbridge-app install
 ```
 
 Optional **background** upgrades (Homebrew’s autoupdate):
@@ -39,10 +38,15 @@ tarball.
 Uninstall:
 
 ```sh
-brew services stop microbridge
+microbridge-app uninstall
 brew uninstall microbridge
 # optional: brew untap DevVig/microbridge
 ```
+
+Advanced headless mode: `brew services start microbridge` runs the standalone
+daemon without the menu-bar app and intentionally creates a separate background
+item. Stop it with `brew services stop microbridge` before returning to the
+standard app-owned lifecycle.
 
 Governance / why this path: [docs/governance.md](docs/governance.md).
 
@@ -54,14 +58,14 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 |---|---|
 | macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
 | From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
-| Hardware LEDs/keys | Codex Micro over USB; enable **Settings → Device → Hardware control** (`MICROBRIDGE_HID_CLAIM=1` remains a developer override) |
+| Hardware LEDs/keys | Codex Micro over USB; claim it from the popover, the menu-bar icon’s right-click menu, or **Settings → Device** (`MICROBRIDGE_HID_CLAIM=1` remains a developer override) |
 
 ## From source (developers)
 
 ```sh
 git clone https://github.com/DevVig/microbridge.git
 cd microbridge
-./scripts/install.sh                 # macOS: daemon + menu bar app + launchd
+./scripts/install.sh                 # macOS: menu bar app + app-owned daemon
 # ./scripts/install.sh --no-ui       # daemon/CLI only (headless)
 # ./scripts/install-linux-systemd.sh
 ```
@@ -105,9 +109,10 @@ app-originated network call. The daemon also contacts a T3 Code environment
 only after you explicitly enable that integration and exchange a one-time pairing
 link; Microbridge has no telemetry or cloud relay.
 
-Homebrew installs are managed by brew instead: the app detects the brew
-marker and points you at `brew upgrade microbridge` rather than self-replacing,
-so the formula version and the on-disk app never drift apart.
+Homebrew installs are managed by brew instead: the app detects the brew marker
+and points you at `brew update && brew upgrade microbridge && microbridge-app
+install` rather than self-replacing, so the formula version and the stable app
+copy never drift apart.
 
 ### Cursor integration
 
@@ -166,35 +171,36 @@ Tauri build). The formula checksums are refreshed by CI after each `v*` tag.
 | `~/.local/bin/microbridged` | Daemon (source / release install) |
 | `~/.microbridge/microbridged.sock` | Local NDJSON socket |
 | `~/.microbridge/config.toml` | Key source, lighting, appearance |
-| `~/.microbridge/daemon.log` | launchd / service logs |
+| `~/.microbridge/microbridged-app.log` | Standard app-owned daemon log |
+| `~/.microbridge/daemon.log` | Headless launchd / service log |
 | `~/.cursor/plugins/local/microbridge` | Bundled Cursor lifecycle integration (only after consent) |
 | `~/.factory/hooks.json` | Existing Factory hooks plus Microbridge-owned lifecycle entries (only after consent) |
 | `~/.microbridge/integrations/factory/microbridgectl` | Signed Factory hook helper (only after consent) |
 | `~/.config/opencode/plugins/microbridge.mjs` | Bundled OpenCode lifecycle and interrupt integration (only after consent) |
-| `~/Library/LaunchAgents/ai.microbridge.ui.plist` | Login item (only if you enable launch at login) |
+| macOS Login Items | Branded Microbridge main-app registration (only if enabled in Settings → General) |
 
 ## Launch at login
 
 The menu bar app asks once, on first launch, whether to start automatically at
-login, and writes the `ai.microbridge.ui` LaunchAgent if you say yes. Toggle it
-any time in **Settings → General**; it takes effect at your next login. This is
-handled by the app rather than the installer, so Homebrew, DMG, and source
-installs all behave the same way.
+login, and registers the signed main app with macOS ServiceManagement if you say
+yes. Toggle it any time in **Settings → General**; if macOS requires approval,
+the same surface opens Login Items directly. The standard GUI path shows the
+Microbridge name and icon rather than a Unix executable.
 
 ## Troubleshooting
 
-**`microbridgectl: connect …`** — daemon not running. Direct installs start the
-bundled daemon with the app; relaunch Microbridge first. For Homebrew installs:
+**`microbridgectl: connect …`** — daemon not running. Standard GUI installs
+start the bundled daemon with the app; relaunch Microbridge first. For explicit
+headless operation:
 
 ```sh
 brew services restart microbridge
-# or:
-launchctl kickstart -k "gui/$(id -u)/ai.microbridge.daemon"
 ```
 
-**LEDs stay dark** — by default Microbridge only probes USB (Detected). Enable
-**Settings → Device → Hardware control**. If the interface is busy, pause the
-other device owner and try again. Developers can still set
+**LEDs stay dark** — by default Microbridge only probes USB (Detected). Choose
+**Claim Codex Micro** in the popover or right-click menu. If the interface is
+busy, pause the other device owner and choose **Retry**. The advanced control
+also remains in **Settings → Device**. Developers can still set
 `MICROBRIDGE_HID_CLAIM=1` before starting the daemon. See
 [docs/device-hid.md](docs/device-hid.md).
 

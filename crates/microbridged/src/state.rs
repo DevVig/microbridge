@@ -26,6 +26,11 @@ pub fn next_conn_id() -> u64 {
     NEXT_CONN.fetch_add(1, Ordering::Relaxed)
 }
 
+fn should_reopen_device(previous: &DaemonConfig, next: &DaemonConfig, connected: bool) -> bool {
+    next.hardware_control_enabled != previous.hardware_control_enabled
+        || (next.hardware_control_enabled && !connected)
+}
+
 pub struct DaemonState {
     pub registry: Registry,
     pub config: DaemonConfig,
@@ -281,8 +286,11 @@ impl DaemonState {
     }
 
     pub fn set_config(&mut self, mut config: DaemonConfig) -> Result<(), String> {
-        let hardware_control_changed =
-            config.hardware_control_enabled != self.config.hardware_control_enabled;
+        // Re-sending enabled while disconnected is an explicit retry. The
+        // config bit records consent/intent; the descriptor is the only proof
+        // that the HID interface was actually claimed.
+        let reopen_device =
+            should_reopen_device(&self.config, &config, self.device.descriptor().connected);
         // `frontmost_app` is watcher-owned runtime state — clients cannot set it.
         let frontmost = self.config.frontmost_app.clone();
         config.normalize();
@@ -291,7 +299,7 @@ impl DaemonState {
 
         let prev_focus = self.registry.focused.clone();
         self.config = config;
-        if hardware_control_changed {
+        if reopen_device {
             self.device = mb_device::open_default_device_with_claim(
                 self.config.hardware_control_enabled || hid_claim_env_enabled(),
             );
@@ -1012,6 +1020,18 @@ mod tests {
 
     fn state() -> DaemonState {
         DaemonState::new(Box::<MockDevice>::default(), DaemonConfig::default())
+    }
+
+    #[test]
+    fn hardware_control_retries_when_requested_but_disconnected() {
+        let disabled = DaemonConfig::default();
+        let mut enabled = disabled.clone();
+        enabled.hardware_control_enabled = true;
+
+        assert!(should_reopen_device(&disabled, &enabled, false));
+        assert!(should_reopen_device(&enabled, &enabled, false));
+        assert!(!should_reopen_device(&enabled, &enabled, true));
+        assert!(should_reopen_device(&enabled, &disabled, true));
     }
 
     #[test]

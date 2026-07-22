@@ -22,9 +22,10 @@ import {
 } from "../components/DeviceTwin";
 import { forgetAdapter, pairAdapter, setAdapterEnabled } from "../lib/bus";
 import {
-  canLaunchAtLogin,
-  launchAtLoginEnabled,
+  launchAtLoginStatus,
+  openLoginItemsSettings,
   setLaunchAtLogin,
+  type LaunchAtLoginStatus,
 } from "../lib/autostart";
 import {
   IntegrationCard,
@@ -144,10 +145,9 @@ export function Settings({
   );
   const pairingInputRef = useRef<HTMLInputElement>(null);
   const integrationDetailRef = useRef<HTMLDivElement>(null);
-  // null until the login item has been read, and permanently null where a login
-  // item is meaningless: outside Tauri, or in a dev build whose executable path
-  // points into `target/debug`.
-  const [atLogin, setAtLogin] = useState<boolean | null>(null);
+  // null only while the native ServiceManagement state is loading.
+  const [atLogin, setAtLogin] = useState<LaunchAtLoginStatus | null>(null);
+  const [atLoginMessage, setAtLoginMessage] = useState<string | null>(null);
 
   const selectIntegration = (adapterId: string) => {
     setSelectedIntegration(adapterId);
@@ -162,9 +162,7 @@ export function Settings({
   useEffect(() => {
     void appVersion().then(setVersion);
     void updateChannel().then(setChannel);
-    void canLaunchAtLogin().then(async (supported) => {
-      if (supported) setAtLogin(await launchAtLoginEnabled());
-    });
+    void launchAtLoginStatus().then(setAtLogin);
   }, []);
 
   const runAdapterOperation = async (adapterId: string, work: () => Promise<string>) => {
@@ -186,13 +184,17 @@ export function Settings({
   // Write first, then adopt what the system actually reports — a failed write
   // must not leave the checkbox claiming something that isn't true.
   const toggleAtLogin = async (next: boolean) => {
-    setAtLogin(next);
+    setAtLoginMessage(null);
     try {
-      await setLaunchAtLogin(next);
-    } catch {
-      /* fall through to the re-read below */
+      setAtLogin(await setLaunchAtLogin(next));
+    } catch (error) {
+      setAtLogin(await launchAtLoginStatus());
+      setAtLoginMessage(
+        error instanceof Error
+          ? error.message
+          : "macOS could not update the Login Item.",
+      );
     }
-    setAtLogin(await launchAtLoginEnabled());
   };
 
   const tabs: { id: Tab; label: string }[] = [
@@ -255,34 +257,59 @@ export function Settings({
               your deck.
             </p>
 
-            <label
-              className="mt-5 flex max-w-md cursor-pointer items-start gap-2.5 rounded-2xl p-4"
+            <div
+              className="mt-5 max-w-md rounded-2xl p-4"
               style={{
                 backgroundColor: t.panel,
                 border: `1px solid ${t.hairline}`,
               }}
             >
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={atLogin === true}
-                disabled={atLogin === null}
-                onChange={(e) => void toggleAtLogin(e.target.checked)}
-              />
-              <span>
-                <span className="block text-[12.5px] font-medium">
-                  Launch Microbridge at login
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={atLogin === "enabled"}
+                  disabled={atLogin === null || atLogin === "unavailable"}
+                  onChange={(e) => void toggleAtLogin(e.target.checked)}
+                />
+                <span>
+                  <span className="block text-[12.5px] font-medium">
+                    Launch Microbridge at login
+                  </span>
+                  <span
+                    className="mt-0.5 block text-[11px] leading-relaxed"
+                    style={{ color: t.textSecondary }}
+                  >
+                    {atLogin === null || atLogin === "unavailable"
+                      ? "Only available in the installed app."
+                      : atLogin === "requires_approval"
+                        ? "Registered, but macOS requires approval in Login Items before it can launch automatically."
+                        : atLogin === "enabled"
+                          ? "Microbridge will return to the menu bar when you log in."
+                          : "Uses Microbridge’s signed app identity so macOS shows the correct name and icon."}
+                  </span>
                 </span>
-                <span
-                  className="mt-0.5 block text-[11px] leading-relaxed"
-                  style={{ color: t.textSecondary }}
+              </label>
+              {atLogin === "requires_approval" && (
+                <button
+                  type="button"
+                  className="mt-3 rounded-lg px-3 py-1.5 text-[11px] font-medium"
+                  style={{ backgroundColor: t.hoverBg, color: t.text }}
+                  onClick={() => void openLoginItemsSettings()}
                 >
-                  {atLogin === null
-                    ? "Only available in the installed app."
-                    : "Adds a login item so the menu bar icon comes back after a restart. Takes effect at your next login."}
-                </span>
-              </span>
-            </label>
+                  Open Login Items…
+                </button>
+              )}
+              {atLoginMessage && (
+                <p
+                  className="mt-3 text-[11px] leading-relaxed"
+                  style={{ color: "#D95D53" }}
+                  role="status"
+                >
+                  {atLoginMessage}
+                </p>
+              )}
+            </div>
           </section>
         )}
 
@@ -601,10 +628,13 @@ export function Settings({
                 className="mt-0.5"
               />
               <span>
-                Claim the Codex Micro for keys, dial, joystick, and lighting
+                Use Microbridge for Codex Micro hardware control
                 <span className="mt-0.5 block text-[11px]" style={{ color: t.textMuted }}>
-                  Off by default to avoid competing with another device owner. Changes apply
-                  immediately.
+                  {snapshot.device_connected
+                    ? "Connected — keys, dial, joystick, and lighting are active."
+                    : cfg.hardware_control_enabled && snapshot.device_name.includes("usb")
+                      ? "Control was requested, but another app may own the HID interface. Retry from the popover or right-click menu, or toggle off and on here."
+                      : "Off by default to avoid competing with another device owner. Changes apply immediately."}
                 </span>
               </span>
             </label>

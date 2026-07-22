@@ -17,6 +17,7 @@ APP_LOG="${RUNNER_TEMP:-/tmp}/microbridge-app.log"
 
 cleanup() {
   brew services stop "$TAP/microbridge" >/dev/null 2>&1 || true
+  microbridge-app uninstall >/dev/null 2>&1 || true
   HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge" >/dev/null 2>&1 || true
   if [[ -f "$MARKER" || -f "$LEGACY_MARKER" ]]; then
     rm -rf "$APP"
@@ -67,7 +68,7 @@ PREFIX="$(brew --prefix "$TAP/microbridge")"
 test -x "$PREFIX/bin/microbridged"
 test -x "$PREFIX/bin/microbridgectl"
 
-brew services start "$TAP/microbridge"
+microbridge-app install
 for _ in {1..30}; do
   [[ -f "$MARKER" ]] && break
   sleep 1
@@ -81,6 +82,31 @@ spctl --assess --type execute --verbose=4 "$APP"
 xcrun stapler validate "$APP"
 syspolicy_check distribution "$APP"
 
+APP_EXECUTABLE="$APP/Contents/MacOS/microbridge-ui"
+APP_PID=""
+for _ in {1..30}; do
+  APP_PID="$(pgrep -f "^${APP_EXECUTABLE}$" | head -n1 || true)"
+  [[ -n "$APP_PID" ]] && break
+  sleep 1
+done
+[[ -n "$APP_PID" ]]
+kill -0 "$APP_PID"
+microbridgectl status >"$APP_LOG"
+kill "$APP_PID" || true
+wait "$APP_PID" || true
+APP_DAEMON_STOPPED=0
+for _ in {1..30}; do
+  if ! microbridgectl status >/dev/null 2>&1; then
+    APP_DAEMON_STOPPED=1
+    break
+  fi
+  sleep 1
+done
+test "$APP_DAEMON_STOPPED" -eq 1
+
+# The daemon service is an explicit headless path, verified separately from
+# the standard app-owned GUI lifecycle above.
+brew services start "$TAP/microbridge"
 SERVICE_STATE=""
 for _ in {1..30}; do
   SERVICE_STATE="$(brew services list --json | jq -r 'map(select(.name=="microbridge")) | .[0].status // empty')"
@@ -89,14 +115,8 @@ for _ in {1..30}; do
 done
 test "$SERVICE_STATE" = "started" || test "$SERVICE_STATE" = "scheduled"
 
-"$APP/Contents/MacOS/microbridge-ui" >"$APP_LOG" 2>&1 &
-APP_PID=$!
-sleep 3
-kill -0 "$APP_PID"
-kill "$APP_PID" || true
-wait "$APP_PID" || true
-
 brew services stop "$TAP/microbridge"
+microbridge-app uninstall
 HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall "$TAP/microbridge"
 test ! -e "$(brew --cellar)/microbridge/$VERSION"
 if brew services list --json | jq -e '.[] | select(.name=="microbridge")' >/dev/null; then
@@ -104,11 +124,6 @@ if brew services list --json | jq -e '.[] | select(.name=="microbridge")' >/dev/
   exit 1
 fi
 
-# The app is deliberately outside the Cellar so the menu-bar UI survives
-# formula upgrades. Remove it only after verifying this install's marker.
-test -f "$MARKER"
-rm -rf "$APP"
-rm -f "$MARKER"
 test ! -e "$APP"
 test ! -e "$MARKER"
 brew untap "$TAP"

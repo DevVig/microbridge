@@ -60,7 +60,7 @@ jobs:
           MARKER="$HOME/Applications/.Microbridge.app.microbridge-brew"
           LEGACY_MARKER="$APP/.microbridge-brew"
           test -x "$(brew --prefix DevVig/microbridge/microbridge)/bin/microbridged"
-          brew services start DevVig/microbridge/microbridge
+          microbridge-app install
           for _ in {1..30}; do
             [[ -f "$MARKER" ]] && break
             sleep 1
@@ -72,6 +72,33 @@ jobs:
           spctl --assess --type execute --verbose=4 "$APP"
           xcrun stapler validate "$APP"
           syspolicy_check distribution "$APP"
+          APP_EXECUTABLE="$APP/Contents/MacOS/microbridge-ui"
+          APP_LOG="$RUNNER_TEMP/microbridge-app.log"
+          APP_PID=""
+          for _ in {1..30}; do
+            APP_PID="$(pgrep -f "^${APP_EXECUTABLE}$" | head -n1 || true)"
+            [[ -n "$APP_PID" ]] && break
+            sleep 1
+          done
+          if [[ -z "$APP_PID" ]] || ! kill -0 "$APP_PID"; then
+            cat "$APP_LOG"
+            exit 1
+          fi
+          microbridgectl status >"$APP_LOG"
+          kill "$APP_PID" || true
+          wait "$APP_PID" || true
+          APP_DAEMON_STOPPED=0
+          for _ in {1..30}; do
+            if ! microbridgectl status >/dev/null 2>&1; then
+              APP_DAEMON_STOPPED=1
+              break
+            fi
+            sleep 1
+          done
+          test "$APP_DAEMON_STOPPED" -eq 1
+          # Verify the separately opted-in headless service after the normal
+          # app-owned lifecycle.
+          brew services start DevVig/microbridge/microbridge
           SERVICE_STATE=""
           for _ in {1..30}; do
             SERVICE_STATE="$(brew services list --json | jq -r 'map(select(.name=="microbridge")) | .[0].status // empty')"
@@ -83,25 +110,13 @@ jobs:
             tail -200 "$(brew --prefix)/var/log/microbridge.log" || true
             exit 1
           fi
-          APP_LOG="$RUNNER_TEMP/microbridge-app.log"
-          "$APP/Contents/MacOS/microbridge-ui" >"$APP_LOG" 2>&1 &
-          APP_PID=$!
-          sleep 3
-          if ! kill -0 "$APP_PID"; then
-            cat "$APP_LOG"
-            exit 1
-          fi
-          kill "$APP_PID" || true
-          wait "$APP_PID" || true
           brew services stop DevVig/microbridge/microbridge
+          microbridge-app uninstall
           HOMEBREW_NO_INSTALL_CLEANUP=1 brew uninstall DevVig/microbridge/microbridge
           if brew services list --json | jq -e '.[] | select(.name=="microbridge")' >/dev/null; then
             echo "microbridge service is still registered after uninstall" >&2
             exit 1
           fi
-          test -f "$MARKER"
-          rm -rf "$APP"
-          rm -f "$MARKER"
           test ! -e "$APP"
           test ! -e "$MARKER"
 

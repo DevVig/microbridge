@@ -6,9 +6,8 @@
  * a LaunchAgent), which meant Homebrew and DMG installs never got it. It's now
  * a property of the app, so every channel behaves the same.
  *
- * The Rust side owns the launchd plist via tauri-plugin-autostart, pinned to
- * the same `ai.microbridge.ui` label the installer used so there is exactly one
- * login entry. See `set_launch_at_login` in src-tauri/src/lib.rs.
+ * The Rust side registers the signed main app through SMAppService, so macOS
+ * shows Microbridge's app identity and icon instead of a Unix executable.
  */
 
 import { invokeTauri } from "./tauri";
@@ -32,33 +31,35 @@ function markAsked(): void {
   }
 }
 
-/**
- * Whether a login item can meaningfully be registered for this build.
- *
- * False under `tauri dev`: the plist records `current_exe()`, so accepting the
- * prompt from a dev build would register `target/debug/microbridge-ui` to launch
- * at every login — a throwaway binary that breaks the moment `target/` is
- * cleaned. Also false outside Tauri.
- */
-export async function canLaunchAtLogin(): Promise<boolean> {
+export type LaunchAtLoginStatus =
+  | "unavailable"
+  | "not_registered"
+  | "enabled"
+  | "requires_approval"
+  | "not_found";
+
+export async function launchAtLoginStatus(): Promise<LaunchAtLoginStatus> {
   try {
-    return (await invokeTauri<boolean>("can_launch_at_login")) ?? false;
+    return (
+      (await invokeTauri<LaunchAtLoginStatus>("launch_at_login_status")) ??
+      "unavailable"
+    );
   } catch {
-    return false;
+    return "unavailable";
   }
 }
 
-/** `null` outside Tauri, where there is no login item to report on. */
-export async function launchAtLoginEnabled(): Promise<boolean | null> {
-  try {
-    return await invokeTauri<boolean>("launch_at_login_enabled");
-  } catch {
-    return null;
-  }
+export async function setLaunchAtLogin(
+  enabled: boolean,
+): Promise<LaunchAtLoginStatus> {
+  const status = await invokeTauri<LaunchAtLoginStatus>("set_launch_at_login", {
+    enabled,
+  });
+  return status ?? "unavailable";
 }
 
-export async function setLaunchAtLogin(enabled: boolean): Promise<void> {
-  await invokeTauri("set_launch_at_login", { enabled });
+export async function openLoginItemsSettings(): Promise<void> {
+  await invokeTauri("open_login_items_settings");
 }
 
 /**
@@ -76,11 +77,9 @@ export async function setLaunchAtLogin(enabled: boolean): Promise<void> {
  */
 export async function promptLaunchAtLoginOnce(): Promise<void> {
   if (alreadyAsked()) return;
-  if (!(await canLaunchAtLogin())) return;
-
-  const enabled = await launchAtLoginEnabled();
-  if (enabled === null) return; // not under Tauri
-  if (enabled) {
+  const status = await launchAtLoginStatus();
+  if (status === "unavailable") return;
+  if (status === "enabled" || status === "requires_approval") {
     markAsked();
     return;
   }

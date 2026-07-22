@@ -226,6 +226,76 @@ describe("Settings", () => {
 });
 
 describe("Popover", () => {
+  it("shows contextual claim, release, and retry actions", () => {
+    const detected = snapshot();
+    detected.device_name = "codex-micro-usb";
+    const availableHtml = renderToStaticMarkup(
+      <Popover
+        snapshot={detected}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onHardwareControl={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(availableHtml).toContain("Codex Micro ready");
+    expect(availableHtml).toContain(">Claim<");
+
+    detected.config.hardware_control_enabled = true;
+    const retryHtml = renderToStaticMarkup(
+      <Popover
+        snapshot={detected}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onHardwareControl={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(retryHtml).toContain("Couldn’t claim Codex Micro");
+    expect(retryHtml).toContain(">Retry<");
+
+    detected.device_connected = true;
+    const connectedHtml = renderToStaticMarkup(
+      <Popover
+        snapshot={detected}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onHardwareControl={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(connectedHtml).toContain("Controlled by Microbridge");
+    expect(connectedHtml).toContain(">Release<");
+  });
+
+  it("keeps guidance but hides hardware actions when unavailable", () => {
+    for (const [deviceName, guidance] of [
+      ["not-connected", "Codex Micro not detected"],
+      ["mock", "Connect a Codex Micro"],
+      ["daemon-offline", "Microbridge daemon offline"],
+    ]) {
+      const unavailable = snapshot();
+      unavailable.device_name = deviceName;
+      const html = renderToStaticMarkup(
+        <Popover
+          snapshot={unavailable}
+          dark
+          onOpenSettings={noop}
+          onTogglePause={noop}
+          onHardwareControl={noop}
+          onQuit={noop}
+        />,
+      );
+      expect(html).toContain(guidance);
+      expect(html).not.toContain(">Claim<");
+      expect(html).not.toContain(">Retry<");
+      expect(html).not.toContain(">Release<");
+    }
+  });
+
   it("renders every thread and makes only the thread list scrollable", () => {
     const sessions = Array.from({ length: 12 }, (_, index): SessionStatus => ({
       id: `thread-${index}`,
@@ -240,6 +310,7 @@ describe("Popover", () => {
         dark
         onOpenSettings={noop}
         onTogglePause={noop}
+        onHardwareControl={noop}
         onQuit={noop}
       />,
     );
@@ -261,6 +332,7 @@ describe("Popover", () => {
         dark
         onOpenSettings={noop}
         onTogglePause={noop}
+        onHardwareControl={noop}
         onQuit={noop}
       />,
     );
@@ -298,6 +370,7 @@ describe("Popover", () => {
         dark
         onOpenSettings={noop}
         onTogglePause={noop}
+        onHardwareControl={noop}
         onQuit={noop}
         onAgentKey={noop}
       />,
@@ -315,6 +388,7 @@ describe("Popover", () => {
         dark
         onOpenSettings={noop}
         onTogglePause={noop}
+        onHardwareControl={noop}
         onQuit={noop}
       />,
     );

@@ -19,7 +19,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
-use tauri_plugin_autostart::ManagerExt;
 use tokio::sync::Mutex;
 
 struct AppState {
@@ -42,27 +41,15 @@ fn daemon_is_reachable() -> bool {
     StdUnixStream::connect(daemon_socket_path()).is_ok()
 }
 
-/// Direct-download builds carry `microbridged` beside the UI executable. If a
-/// Homebrew/launchd daemon is already reachable we leave it alone; otherwise
-/// the app owns this child for its lifetime.
-fn start_bundled_daemon() -> Option<Child> {
-    if daemon_is_reachable() {
-        return None;
-    }
-    let mut candidates = Vec::new();
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(directory) = executable.parent() {
-            candidates.push(directory.join("microbridged"));
-        }
-    }
-    candidates.extend([
-        PathBuf::from("/opt/homebrew/bin/microbridged"),
-        PathBuf::from("/usr/local/bin/microbridged"),
-    ]);
-    let binary = candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())?;
+fn bundled_daemon_path() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(|directory| directory.join("microbridged"))
+        .filter(|candidate| candidate.is_file())
+}
 
+fn spawn_owned_daemon(binary: &Path) -> Option<Child> {
     let log_path = daemon_socket_path().with_file_name("microbridged-app.log");
     if let Some(directory) = log_path.parent() {
         let _ = fs::create_dir_all(directory);
@@ -74,11 +61,317 @@ fn start_bundled_daemon() -> Option<Child> {
         .ok()?;
     let stderr = stdout.try_clone().ok()?;
     Command::new(binary)
-        .stdin(Stdio::null())
+        .arg("--exit-with-parent")
+        // The daemon watches this pipe only in app-owned mode. A crash closes
+        // the descriptor too, so it cannot become an unowned orphan.
+        .stdin(Stdio::piped())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
         .ok()
+}
+
+/// Direct-download builds carry `microbridged` beside the UI executable. If a
+/// Homebrew/launchd daemon is already reachable we leave it alone; otherwise
+/// the app owns this child for its lifetime.
+fn start_bundled_daemon() -> Option<Child> {
+    if daemon_is_reachable() {
+        return None;
+    }
+    let mut candidates = Vec::new();
+    if let Some(bundled) = bundled_daemon_path() {
+        candidates.push(bundled);
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/microbridged"),
+        PathBuf::from("/usr/local/bin/microbridged"),
+    ]);
+    let binary = candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())?;
+
+    spawn_owned_daemon(&binary)
+}
+
+const DAEMON_MIGRATION_MARKER: &str = "app-owned-daemon-v1";
+
+fn daemon_migration_marker_path() -> PathBuf {
+    let user_home = std::env::var_os("HOME").unwrap_or_else(|| ".".into());
+    PathBuf::from(user_home)
+        .join(".microbridge")
+        .join("migrations")
+        .join(DAEMON_MIGRATION_MARKER)
+}
+
+fn known_legacy_daemon_agent(path: &Path, contents: &str) -> Option<&'static str> {
+    let value = plist::Value::from_reader_xml(contents.as_bytes()).ok()?;
+    let dictionary = value.as_dictionary()?;
+    let label = dictionary.get("Label")?.as_string()?;
+    let executable = dictionary
+        .get("ProgramArguments")?
+        .as_array()?
+        .first()?
+        .as_string()?;
+    let executable = Path::new(executable);
+
+    match (path.file_name().and_then(|name| name.to_str()), label) {
+        (Some("ai.microbridge.daemon.plist"), "ai.microbridge.daemon")
+            if direct_daemon_executable(executable) =>
+        {
+            Some("ai.microbridge.daemon")
+        }
+        (Some("homebrew.mxcl.microbridge.plist"), "homebrew.mxcl.microbridge")
+            if homebrew_daemon_executable(executable) =>
+        {
+            Some("homebrew.mxcl.microbridge")
+        }
+        _ => None,
+    }
+}
+
+fn direct_daemon_executable(executable: &Path) -> bool {
+    let home_binary = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".local/bin/microbridged"));
+    home_binary.as_deref() == Some(executable)
+        || executable == Path::new("/usr/local/bin/microbridged")
+        || executable == Path::new("/opt/homebrew/bin/microbridged")
+}
+
+fn homebrew_daemon_executable(executable: &Path) -> bool {
+    [
+        "/opt/homebrew/opt/microbridge/bin/microbridged",
+        "/usr/local/opt/microbridge/bin/microbridged",
+        "/opt/homebrew/opt/microbridge/libexec/microbridge-service",
+        "/usr/local/opt/microbridge/libexec/microbridge-service",
+    ]
+    .into_iter()
+    .any(|known| executable == Path::new(known))
+}
+
+struct LegacyDaemonAgent {
+    path: PathBuf,
+    label: &'static str,
+    contents: String,
+}
+
+fn restore_legacy_agent_files(agents: &[LegacyDaemonAgent]) {
+    for agent in agents {
+        let _ = fs::write(&agent.path, &agent.contents);
+    }
+}
+
+fn finalize_legacy_daemon_migration(marker: &Path, agents: &[LegacyDaemonAgent]) -> Result<(), ()> {
+    if let Some(directory) = marker.parent() {
+        fs::create_dir_all(directory).map_err(|_| ())?;
+    }
+    fs::write(marker, b"Microbridge app owns the bundled daemon.\n").map_err(|_| ())?;
+    if agents
+        .iter()
+        .any(|agent| fs::remove_file(&agent.path).is_err())
+    {
+        let _ = fs::remove_file(marker);
+        restore_legacy_agent_files(agents);
+        return Err(());
+    }
+    Ok(())
+}
+
+fn legacy_daemon_agents() -> Vec<LegacyDaemonAgent> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let directory = PathBuf::from(home).join("Library/LaunchAgents");
+    [
+        "ai.microbridge.daemon.plist",
+        "homebrew.mxcl.microbridge.plist",
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        let path = directory.join(name);
+        let contents = fs::read_to_string(&path).ok()?;
+        known_legacy_daemon_agent(&path, &contents).map(|label| LegacyDaemonAgent {
+            path,
+            label,
+            contents,
+        })
+    })
+    .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn bootstrap_legacy_agent(path: &Path) {
+    let Some(domain) = current_user_launchd_domain() else {
+        return;
+    };
+    let _ = Command::new("/bin/launchctl")
+        .args(["bootstrap", &domain])
+        .arg(path)
+        .status();
+}
+
+/// One-time conversion of standard GUI installs from a separately registered
+/// daemon to the daemon bundled inside the app. A later explicit headless
+/// service start is respected because the completed marker suppresses this.
+#[cfg(target_os = "macos")]
+fn migrate_legacy_daemon_to_app() -> Result<Option<Child>, ()> {
+    let marker = daemon_migration_marker_path();
+    if marker.is_file() {
+        return Ok(None);
+    }
+    let agents = legacy_daemon_agents();
+    if agents.is_empty() {
+        return Ok(None);
+    }
+    let Some(binary) = bundled_daemon_path() else {
+        return Err(());
+    };
+
+    for agent in &agents {
+        bootout_legacy_agent(agent.label);
+    }
+    for _ in 0..20 {
+        if !daemon_is_reachable() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if daemon_is_reachable() {
+        for agent in &agents {
+            bootstrap_legacy_agent(&agent.path);
+        }
+        return Err(());
+    }
+
+    let Some(mut child) = spawn_owned_daemon(&binary) else {
+        for agent in &agents {
+            bootstrap_legacy_agent(&agent.path);
+        }
+        return Err(());
+    };
+    for _ in 0..60 {
+        if daemon_is_reachable() {
+            if finalize_legacy_daemon_migration(&marker, &agents).is_ok() {
+                return Ok(Some(child));
+            }
+            break;
+        }
+        if child.try_wait().ok().flatten().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+    restore_legacy_agent_files(&agents);
+    for agent in &agents {
+        bootstrap_legacy_agent(&agent.path);
+    }
+    Err(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn migrate_legacy_daemon_to_app() -> Result<Option<Child>, ()> {
+    Ok(None)
+}
+
+#[cfg(test)]
+mod daemon_migration_tests {
+    use super::*;
+
+    fn launch_agent_plist(label: &str, executable: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array><string>{executable}</string></array>
+</dict></plist>"#
+        )
+    }
+
+    fn test_directory(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "microbridge-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn recognizes_only_owned_legacy_agents() {
+        let direct = Path::new("/tmp/ai.microbridge.daemon.plist");
+        assert_eq!(
+            known_legacy_daemon_agent(
+                direct,
+                &launch_agent_plist("ai.microbridge.daemon", "/usr/local/bin/microbridged")
+            ),
+            Some("ai.microbridge.daemon")
+        );
+        assert_eq!(known_legacy_daemon_agent(direct, "unrelated"), None);
+        assert_eq!(
+            known_legacy_daemon_agent(
+                Path::new("/tmp/com.example.agent.plist"),
+                &launch_agent_plist("ai.microbridge.daemon", "/usr/local/bin/microbridged")
+            ),
+            None
+        );
+        assert_eq!(
+            known_legacy_daemon_agent(
+                direct,
+                &launch_agent_plist("ai.microbridge.daemon", "/tmp/unrelated/microbridged")
+            ),
+            None
+        );
+        assert_eq!(
+            known_legacy_daemon_agent(
+                Path::new("/tmp/homebrew.mxcl.microbridge.plist"),
+                &launch_agent_plist(
+                    "homebrew.mxcl.microbridge",
+                    "/opt/homebrew/opt/microbridge/bin/microbridged"
+                )
+            ),
+            Some("homebrew.mxcl.microbridge")
+        );
+    }
+
+    #[test]
+    fn successful_conversion_records_marker_then_removes_owned_plists() {
+        let directory = test_directory("migration-success");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("ai.microbridge.daemon.plist");
+        fs::write(&path, "owned service").unwrap();
+        let marker = directory.join("migration-complete");
+        let agents = vec![LegacyDaemonAgent {
+            path: path.clone(),
+            label: "ai.microbridge.daemon",
+            contents: "owned service".into(),
+        }];
+
+        assert_eq!(finalize_legacy_daemon_migration(&marker, &agents), Ok(()));
+        assert!(marker.is_file());
+        assert!(!path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn daemon_start_rollback_restores_original_service_files() {
+        let directory = test_directory("migration-rollback");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("ai.microbridge.daemon.plist");
+        let agents = vec![LegacyDaemonAgent {
+            path: path.clone(),
+            label: "ai.microbridge.daemon",
+            contents: "original service".into(),
+        }];
+
+        restore_legacy_agent_files(&agents);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original service");
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 const CURSOR_PLUGIN_NAME: &str = "microbridge";
@@ -546,7 +839,9 @@ fn claude_hook_source(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn install_claude_hooks(app: &AppHandle) -> Result<PathBuf, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is unset".to_string())?;
-    let hook_dir = PathBuf::from(&home).join(".microbridge").join("claude-hooks");
+    let hook_dir = PathBuf::from(&home)
+        .join(".microbridge")
+        .join("claude-hooks");
     fs::create_dir_all(&hook_dir).map_err(|e| e.to_string())?;
     let dest = hook_dir.join("microbridge-permission.mjs");
     let source = claude_hook_source(app)?;
@@ -587,8 +882,7 @@ fn install_claude_hooks(app: &AppHandle) -> Result<PathBuf, String> {
     let mut changed = false;
     let mb_owned_or_empty = |existing: &serde_json::Value| {
         let text = existing.to_string();
-        text.contains("microbridge-permission")
-            || existing.as_array().is_some_and(|a| a.is_empty())
+        text.contains("microbridge-permission") || existing.as_array().is_some_and(|a| a.is_empty())
     };
     if hooks_obj.get("PermissionRequest") != Some(&permission_entry) {
         let existing = hooks_obj
@@ -1247,7 +1541,7 @@ fn resize_popover(app: AppHandle, height: f64) {
 }
 
 /// Install channel of the running app. Homebrew drops an ownership marker next
-/// to the bundle (installed by the formula's service wrapper); its absence means
+/// to the bundle (installed by `microbridge-app`); its absence means
 /// a DMG/manual install. The marker must stay outside `Microbridge.app`, because
 /// adding a file to the bundle after signing invalidates its sealed signature.
 /// The in-app self-updater only replaces `direct` installs — brew copies are
@@ -1295,90 +1589,359 @@ fn trigger_update_check(app: &AppHandle) {
     let _ = app.emit("menu://check-updates", ());
 }
 
-/// launchd label for the login item. Deliberately the same label `install.sh`
-/// used to write by hand, so the autostart plugin owns that exact file
-/// (`~/Library/LaunchAgents/ai.microbridge.ui.plist`) instead of creating a
-/// second one. Without this the plugin would default to `package_info().name`
-/// ("Microbridge") and a source install would end up with two login entries.
-const LOGIN_ITEM_LABEL: &str = "ai.microbridge.ui";
-
-/// True when the executable sits inside a `.app` bundle.
-///
-/// `tauri dev` runs the bare binary out of `target/debug`, and the login item
-/// records whatever `current_exe()` returns — so accepting the prompt during
-/// development would register a throwaway build to launch at every login, and
-/// leave a dangling login item behind the moment `target/` is cleaned.
-fn running_from_app_bundle() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            exe.ancestors()
-                .nth(3)
-                .map(|bundle| bundle.extension().is_some_and(|ext| ext == "app"))
-        })
-        .unwrap_or(false)
+#[derive(Debug, PartialEq, Eq)]
+struct HardwareMenuPresentation {
+    label: &'static str,
+    enabled: bool,
+    target_enabled: Option<bool>,
 }
 
-/// Whether a login item can meaningfully be registered for this build.
-#[tauri::command]
-fn can_launch_at_login() -> bool {
-    running_from_app_bundle()
+fn hardware_menu_presentation_for(
+    device_connected: bool,
+    device_name: &str,
+    control_requested: bool,
+) -> HardwareMenuPresentation {
+    if device_connected {
+        return HardwareMenuPresentation {
+            label: "Release Codex Micro",
+            enabled: true,
+            target_enabled: Some(false),
+        };
+    }
+    if device_name.contains("usb") {
+        return HardwareMenuPresentation {
+            label: if control_requested {
+                "Retry Codex Micro Claim"
+            } else {
+                "Claim Codex Micro"
+            },
+            enabled: true,
+            target_enabled: Some(true),
+        };
+    }
+    HardwareMenuPresentation {
+        label: "Codex Micro Not Detected",
+        enabled: false,
+        target_enabled: None,
+    }
 }
 
-#[tauri::command]
-fn launch_at_login_enabled(app: AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+fn hardware_menu_presentation(snapshot: Option<&Snapshot>) -> HardwareMenuPresentation {
+    snapshot.map_or_else(
+        || hardware_menu_presentation_for(false, "daemon-offline", false),
+        |snapshot| {
+            hardware_menu_presentation_for(
+                snapshot.device_connected,
+                &snapshot.device_name,
+                snapshot.config.hardware_control_enabled,
+            )
+        },
+    )
 }
 
-#[tauri::command]
-fn set_launch_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let manager = app.autolaunch();
-    if enabled {
-        // Writes the plist with RunAtLoad; launchd picks it up at next login.
-        // Deliberately not bootstrapped here — that would fire RunAtLoad
-        // immediately and start a second copy of the app.
-        manager.enable().map_err(|e| e.to_string())?;
-    } else {
-        manager.disable().map_err(|e| e.to_string())?;
-        bootout_login_item();
+async fn apply_hardware_menu_action(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut config = {
+        let snapshot = state.snapshot.lock().await;
+        let snapshot = snapshot
+            .as_ref()
+            .ok_or_else(|| "waiting for microbridged".to_string())?;
+        let presentation = hardware_menu_presentation(Some(snapshot));
+        let Some(enabled) = presentation.target_enabled else {
+            return Ok(());
+        };
+        let mut config = snapshot.config.clone();
+        config.hardware_control_enabled = enabled;
+        config
+    };
+
+    // Preserve the daemon's normalized response as the source of truth.
+    let next = state.bus.set_config(config.clone()).await?;
+    config = next;
+    let mut snapshot = state.snapshot.lock().await;
+    if let Some(snapshot) = snapshot.as_mut() {
+        snapshot.config = config;
+        let _ = app.emit("bus-snapshot", snapshot.clone());
     }
     Ok(())
 }
 
-/// `disable()` only deletes the plist. Installs that came from `install.sh` also
-/// had the agent *bootstrapped* into the running launchd session, so without
-/// this it would linger in `launchctl print` until the next logout. Best-effort:
-/// a missing agent is the normal case and its error is not interesting.
+#[cfg(test)]
+mod hardware_menu_tests {
+    use super::*;
+
+    #[test]
+    fn menu_labels_follow_actual_claim_and_requested_state() {
+        assert_eq!(
+            hardware_menu_presentation_for(false, "codex-micro-usb", false),
+            HardwareMenuPresentation {
+                label: "Claim Codex Micro",
+                enabled: true,
+                target_enabled: Some(true),
+            }
+        );
+        assert_eq!(
+            hardware_menu_presentation_for(false, "codex-micro-usb", true).label,
+            "Retry Codex Micro Claim"
+        );
+        assert_eq!(
+            hardware_menu_presentation_for(true, "codex-micro-usb", false).label,
+            "Release Codex Micro"
+        );
+        assert!(!hardware_menu_presentation_for(false, "mock", false).enabled);
+    }
+}
+
+const LEGACY_UI_LOGIN_LABEL: &str = "ai.microbridge.ui";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LoginItemStatus {
+    Unavailable,
+    NotRegistered,
+    Enabled,
+    RequiresApproval,
+    NotFound,
+}
+
+fn is_installed_app_executable(executable: &Path) -> bool {
+    let display = executable.to_string_lossy();
+    !display.contains("/target/debug/")
+        && executable
+            .ancestors()
+            .any(|path| path.extension().is_some_and(|extension| extension == "app"))
+}
+
+fn can_register_login_item() -> bool {
+    std::env::current_exe()
+        .ok()
+        .is_some_and(|executable| is_installed_app_executable(&executable))
+}
+
 #[cfg(target_os = "macos")]
-fn bootout_login_item() {
-    let _ = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(format!("launchctl bootout gui/$(id -u)/{LOGIN_ITEM_LABEL}"))
-        .status();
+fn login_item_status_from_native(
+    status: objc2_service_management::SMAppServiceStatus,
+) -> LoginItemStatus {
+    use objc2_service_management::SMAppServiceStatus;
+
+    match status {
+        SMAppServiceStatus::NotRegistered => LoginItemStatus::NotRegistered,
+        SMAppServiceStatus::Enabled => LoginItemStatus::Enabled,
+        SMAppServiceStatus::RequiresApproval => LoginItemStatus::RequiresApproval,
+        SMAppServiceStatus::NotFound => LoginItemStatus::NotFound,
+        _ => LoginItemStatus::NotFound,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_login_item_status() -> LoginItemStatus {
+    use objc2_service_management::SMAppService;
+
+    if !can_register_login_item() {
+        return LoginItemStatus::Unavailable;
+    }
+    let service = unsafe { SMAppService::mainAppService() };
+    login_item_status_from_native(unsafe { service.status() })
 }
 
 #[cfg(not(target_os = "macos"))]
-fn bootout_login_item() {}
+fn native_login_item_status() -> LoginItemStatus {
+    LoginItemStatus::Unavailable
+}
+
+fn bounded_login_item_error(action: &str, error: impl std::fmt::Display) -> String {
+    let message = format!("Could not {action} launch at login: {error}");
+    message.chars().take(280).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_launch_at_login(enabled: bool) -> Result<LoginItemStatus, String> {
+    use objc2_service_management::SMAppService;
+
+    if !can_register_login_item() {
+        return Err("Launch at login is only available from an installed Microbridge app.".into());
+    }
+    let service = unsafe { SMAppService::mainAppService() };
+    let status = native_login_item_status();
+    if enabled && status != LoginItemStatus::Enabled {
+        unsafe { service.registerAndReturnError() }
+            .map_err(|error| bounded_login_item_error("enable", error))?;
+    } else if !enabled
+        && !matches!(
+            status,
+            LoginItemStatus::NotRegistered | LoginItemStatus::NotFound
+        )
+    {
+        unsafe { service.unregisterAndReturnError() }
+            .map_err(|error| bounded_login_item_error("disable", error))?;
+    }
+    Ok(native_login_item_status())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_launch_at_login(_enabled: bool) -> Result<LoginItemStatus, String> {
+    Err("Launch at login is only available on macOS.".into())
+}
+
+#[tauri::command]
+fn launch_at_login_status() -> LoginItemStatus {
+    native_login_item_status()
+}
+
+#[tauri::command]
+fn set_launch_at_login(enabled: bool) -> Result<LoginItemStatus, String> {
+    set_native_launch_at_login(enabled)
+}
+
+#[tauri::command]
+fn open_login_items_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_service_management::SMAppService;
+        unsafe { SMAppService::openSystemSettingsLoginItems() };
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Login Items settings are only available on macOS.".into())
+    }
+}
+
+fn legacy_ui_login_item_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join("Library/LaunchAgents")
+            .join(format!("{LEGACY_UI_LOGIN_LABEL}.plist"))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn current_user_launchd_domain() -> Option<String> {
+    let output = Command::new("/usr/bin/id").arg("-u").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let uid = String::from_utf8(output.stdout).ok()?;
+    Some(format!("gui/{}", uid.trim()))
+}
+
+#[cfg(target_os = "macos")]
+fn bootout_legacy_agent(label: &str) {
+    let Some(domain) = current_user_launchd_domain() else {
+        return;
+    };
+    let _ = Command::new("/bin/launchctl")
+        .args(["bootout", &format!("{domain}/{label}")])
+        .status();
+}
+
+fn migrate_legacy_ui_login_item() {
+    let Some(path) = legacy_ui_login_item_path() else {
+        return;
+    };
+    if !path.is_file() || !can_register_login_item() {
+        return;
+    }
+    let initial_status = native_login_item_status();
+    let registration_succeeded =
+        initial_status == LoginItemStatus::Enabled || set_native_launch_at_login(true).is_ok();
+    let final_status = native_login_item_status();
+    if legacy_ui_login_migration_completed(initial_status, registration_succeeded, final_status) {
+        #[cfg(target_os = "macos")]
+        bootout_legacy_agent(LEGACY_UI_LOGIN_LABEL);
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn legacy_ui_login_migration_completed(
+    initial_status: LoginItemStatus,
+    registration_succeeded: bool,
+    final_status: LoginItemStatus,
+) -> bool {
+    (initial_status == LoginItemStatus::Enabled || registration_succeeded)
+        && final_status == LoginItemStatus::Enabled
+}
+
+#[cfg(test)]
+mod login_item_tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn maps_all_native_login_item_statuses() {
+        use objc2_service_management::SMAppServiceStatus;
+
+        assert_eq!(
+            login_item_status_from_native(SMAppServiceStatus::NotRegistered),
+            LoginItemStatus::NotRegistered
+        );
+        assert_eq!(
+            login_item_status_from_native(SMAppServiceStatus::Enabled),
+            LoginItemStatus::Enabled
+        );
+        assert_eq!(
+            login_item_status_from_native(SMAppServiceStatus::RequiresApproval),
+            LoginItemStatus::RequiresApproval
+        );
+        assert_eq!(
+            login_item_status_from_native(SMAppServiceStatus::NotFound),
+            LoginItemStatus::NotFound
+        );
+    }
+
+    #[test]
+    fn dev_executables_cannot_register_as_login_items() {
+        assert!(!is_installed_app_executable(Path::new(
+            "/tmp/target/debug/bundle/macos/Microbridge.app/Contents/MacOS/microbridge-ui"
+        )));
+        assert!(is_installed_app_executable(Path::new(
+            "/Applications/Microbridge.app/Contents/MacOS/microbridge-ui"
+        )));
+        assert!(!is_installed_app_executable(Path::new(
+            "/tmp/microbridge-ui"
+        )));
+    }
+
+    #[test]
+    fn native_registration_failure_preserves_legacy_login_item() {
+        assert!(!legacy_ui_login_migration_completed(
+            LoginItemStatus::NotRegistered,
+            false,
+            LoginItemStatus::NotRegistered,
+        ));
+        assert!(legacy_ui_login_migration_completed(
+            LoginItemStatus::NotRegistered,
+            true,
+            LoginItemStatus::Enabled,
+        ));
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::args().any(|argument| argument == "--unregister-login-item") {
+        let _ = set_native_launch_at_login(false);
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .app_name(LOGIN_ITEM_LABEL)
-                .build(),
-        )
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
-            let bundled_daemon = start_bundled_daemon();
+            migrate_legacy_ui_login_item();
+            let bundled_daemon = match migrate_legacy_daemon_to_app() {
+                Ok(Some(child)) => Some(child),
+                Ok(None) => start_bundled_daemon(),
+                // The legacy service was restored; do not race it with a
+                // second daemon if the migration could not be completed.
+                Err(()) => None,
+            };
             let (bus, mut event_rx) = spawn_bus_loop();
             let snapshot: CachedSnapshot = Arc::new(Mutex::new(None));
             let hud_generation = Arc::new(AtomicU64::new(0));
@@ -1543,6 +2106,13 @@ pub fn run() {
 
             // Right-click context menu. Left-click still toggles the popover
             // (`show_menu_on_left_click(false)` keeps the menu on right-click only).
+            let hardware_item = MenuItem::with_id(
+                app,
+                "hardware-control",
+                "Codex Micro Not Detected",
+                false,
+                None::<&str>,
+            )?;
             let check_updates_item = MenuItem::with_id(
                 app,
                 "check-updates",
@@ -1557,6 +2127,8 @@ pub fn run() {
             let tray_menu = Menu::with_items(
                 app,
                 &[
+                    &hardware_item,
+                    &PredefinedMenuItem::separator(app)?,
                     &check_updates_item,
                     &settings_item,
                     &PredefinedMenuItem::separator(app)?,
@@ -1564,6 +2136,7 @@ pub fn run() {
                 ],
             )?;
             let context_menu = tray_menu.clone();
+            let hardware_item_for_tray = hardware_item.clone();
 
             let blur_hide: BlurHideClock = Arc::new(std::sync::Mutex::new(None));
             let blur_hide_tray = Arc::clone(&blur_hide);
@@ -1577,6 +2150,12 @@ pub fn run() {
                 // making left and right clicks indistinguishable. We pop it up
                 // explicitly only for a right-button release below.
                 .on_menu_event(|app, event| match event.id.as_ref() {
+                    "hardware-control" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = apply_hardware_menu_action(app).await;
+                        });
+                    }
                     "check-updates" => trigger_update_check(app),
                     "settings" => show_settings_window(app),
                     "quit" => app.exit(0),
@@ -1610,7 +2189,17 @@ pub fn run() {
                         button_state: MouseButtonState::Up,
                         ..
                     } => {
-                        if let Some(window) = tray.app_handle().get_webview_window("popover") {
+                        let app = tray.app_handle();
+                        if let Some(state) = app.try_state::<AppState>() {
+                            // This cached lock is held only for in-memory event
+                            // updates. Read it synchronously so the native menu
+                            // can never open with a stale action or label.
+                            let snapshot = state.snapshot.blocking_lock();
+                            let presentation = hardware_menu_presentation(snapshot.as_ref());
+                            let _ = hardware_item_for_tray.set_text(presentation.label);
+                            let _ = hardware_item_for_tray.set_enabled(presentation.enabled);
+                        }
+                        if let Some(window) = app.get_webview_window("popover") {
                             let _ = context_menu.popup(window.as_ref().window());
                         }
                     }
@@ -1655,9 +2244,9 @@ pub fn run() {
             quit_ui,
             update_channel,
             app_version,
-            launch_at_login_enabled,
+            launch_at_login_status,
             set_launch_at_login,
-            can_launch_at_login,
+            open_login_items_settings,
             popover_max_height,
             resize_popover
         ])

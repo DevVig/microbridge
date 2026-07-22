@@ -145,6 +145,12 @@ export default function App() {
           pause_leds: !snapshot.config.pause_leds,
         })
       }
+      onHardwareControl={(enabled) =>
+        void applyConfig({
+          ...snapshot.config,
+          hardware_control_enabled: enabled,
+        })
+      }
       onQuit={() => void quitUi()}
       onAgentKey={(index, open) => void activateAgentKey(index, open)}
     />
