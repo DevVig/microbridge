@@ -126,7 +126,7 @@ export function IntegrationCard({
     "group relative flex h-[72px] w-full cursor-pointer flex-col items-stretch justify-between rounded-xl px-2 py-1.5 text-left transition-[background-color,border-color,box-shadow,opacity]";
 
   return (
-    <li className="relative list-none">
+    <div className="relative">
       <button
         type="button"
         onClick={onSelect}
@@ -138,7 +138,7 @@ export function IntegrationCard({
       >
         {face}
       </button>
-    </li>
+    </div>
   );
 }
 
