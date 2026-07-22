@@ -8,10 +8,10 @@
  */
 
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 const PENDING = path.join(os.homedir(), ".microbridge", "claude-pending");
 const SOCKET =
@@ -53,7 +53,7 @@ function ingestLifecycle(id, state) {
     };
     socket.setTimeout(800, finish);
     socket.on("error", finish);
-    socket.on("data", finish);
+    socket.on("close", finish);
     socket.on("connect", () => {
       const messages = [
         {
@@ -81,11 +81,13 @@ function ingestLifecycle(id, state) {
       for (const message of messages) {
         socket.write(`${JSON.stringify(message)}\n`);
       }
+      // Fire-and-forget: daemon does not reply; close so we do not wait on timeout.
+      socket.end();
     });
   });
 }
 
-function waitDecision(id, timeoutMs) {
+async function waitDecision(id, timeoutMs) {
   ensureDir(PENDING);
   const specific = path.join(PENDING, `${id}.decision`);
   const latest = path.join(PENDING, "latest.decision");
@@ -111,11 +113,7 @@ function waitDecision(id, timeoutMs) {
     } catch {
       /* ignore */
     }
-    try {
-      execFileSync("sleep", ["0.05"], { stdio: "ignore" });
-    } catch {
-      /* ignore */
-    }
+    await delay(50);
   }
   return null;
 }
@@ -180,7 +178,7 @@ fs.writeFileSync(
 );
 await ingestLifecycle(id, "awaiting_approval");
 
-const decision = waitDecision(id, 10 * 60 * 1000);
+const decision = await waitDecision(id, 10 * 60 * 1000);
 if (!decision) {
   // Timeout: let Claude's normal UI handle it (do not silently deny).
   process.stdout.write("{}");

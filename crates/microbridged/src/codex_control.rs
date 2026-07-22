@@ -90,18 +90,22 @@ async fn refresh_status(shared: &Arc<Mutex<DaemonState>>) {
             control_capabilities(),
             "Codex journals live; app-server control socket detected — interrupt/approve attach on demand.",
         );
-        state.set_adapter_runtime(
-            "chatgpt",
-            AdapterConnectionState::Connected,
-            control_capabilities(),
-            "ChatGPT Codex sessions inherit Codex app-server control when the socket is present.",
-        );
-        state.set_adapter_runtime(
-            "synara",
-            AdapterConnectionState::Connected,
-            control_capabilities(),
-            "Synara Codex-backed sessions inherit app-server control when the socket is present.",
-        );
+        if state.adapter_enabled("chatgpt") {
+            state.set_adapter_runtime(
+                "chatgpt",
+                AdapterConnectionState::Connected,
+                control_capabilities(),
+                "ChatGPT Codex sessions inherit Codex app-server control when the socket is present.",
+            );
+        }
+        if state.adapter_enabled("synara") {
+            state.set_adapter_runtime(
+                "synara",
+                AdapterConnectionState::Connected,
+                control_capabilities(),
+                "Synara Codex-backed sessions inherit app-server control when the socket is present.",
+            );
+        }
     } else {
         state.set_internal_capabilities(CODEX_OWNER, lifecycle_capabilities());
         state.set_adapter_runtime(
@@ -202,7 +206,7 @@ async fn proxy_rpc(sock: &Path, method: &str, params: Value) -> Result<(), Strin
     next_id += 1;
 
     // initialized notification (no id)
-    let note = json!({ "method": "initialized" });
+    let note = json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} });
     stdin
         .write_all(format!("{note}\n").as_bytes())
         .await
@@ -225,7 +229,7 @@ async fn write_rpc(
     method: &str,
     params: Value,
 ) -> Result<(), String> {
-    let msg = json!({ "id": id, "method": method, "params": params });
+    let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
     stdin
         .write_all(format!("{msg}\n").as_bytes())
         .await

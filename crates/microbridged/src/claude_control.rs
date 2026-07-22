@@ -75,12 +75,14 @@ async fn refresh_status(shared: &Arc<Mutex<DaemonState>>) {
             control_capabilities(),
             "Claude journals live; PermissionRequest hooks bridge Approve/Reject/Interrupt.",
         );
-        state.set_adapter_runtime(
-            "claude_desktop",
-            AdapterConnectionState::Connected,
-            control_capabilities(),
-            "Claude Desktop sessions inherit the PermissionRequest hook bridge.",
-        );
+        if state.adapter_enabled("claude_desktop") {
+            state.set_adapter_runtime(
+                "claude_desktop",
+                AdapterConnectionState::Connected,
+                control_capabilities(),
+                "Claude Desktop sessions inherit the PermissionRequest hook bridge.",
+            );
+        }
     } else {
         state.set_internal_capabilities(CLAUDE_OWNER, lifecycle_capabilities());
         state.set_adapter_runtime(

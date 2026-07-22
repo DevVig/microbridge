@@ -525,21 +525,31 @@ fn sync_factory_integration(synced: &AtomicBool, enabled: bool) {
 
 /// Install Claude PermissionRequest hooks under ~/.microbridge/claude-hooks
 /// and merge into ~/.claude/settings.json (idempotent, lean — only writes when needed).
-fn install_claude_hooks() -> Result<PathBuf, String> {
+fn claude_hook_source(app: &AppHandle) -> Result<PathBuf, String> {
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("claude-hooks")
+        .join("microbridge-permission.mjs");
+    if bundled.is_file() {
+        return Ok(bundled);
+    }
+    // `tauri dev` reads the repository copy; release bundles use Resources.
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../adapters/claude/hooks/microbridge-permission.mjs");
+    if repository.is_file() {
+        return Ok(repository);
+    }
+    Err("Claude hook script not found in the Microbridge bundle.".into())
+}
+
+fn install_claude_hooks(app: &AppHandle) -> Result<PathBuf, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is unset".to_string())?;
     let hook_dir = PathBuf::from(&home).join(".microbridge").join("claude-hooks");
     fs::create_dir_all(&hook_dir).map_err(|e| e.to_string())?;
     let dest = hook_dir.join("microbridge-permission.mjs");
-    let source_candidates = [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../adapters/claude/hooks/microbridge-permission.mjs"),
-        PathBuf::from(&home)
-            .join("dev/t3PRHelp/adapters/claude/hooks/microbridge-permission.mjs"),
-    ];
-    let source = source_candidates
-        .into_iter()
-        .find(|p| p.is_file())
-        .ok_or_else(|| "Claude hook script not found in the Microbridge bundle.".to_string())?;
+    let source = claude_hook_source(app)?;
     let body = fs::read_to_string(&source).map_err(|e| e.to_string())?;
     if fs::read_to_string(&dest).ok().as_deref() != Some(body.as_str()) {
         fs::write(&dest, &body).map_err(|e| e.to_string())?;
@@ -607,8 +617,8 @@ fn install_claude_hooks() -> Result<PathBuf, String> {
     Ok(dest)
 }
 
-fn sync_claude_hooks(synced: &AtomicBool) {
-    if !synced.swap(true, Ordering::Relaxed) && install_claude_hooks().is_err() {
+fn sync_claude_hooks(app: &AppHandle, synced: &AtomicBool) {
+    if !synced.swap(true, Ordering::Relaxed) && install_claude_hooks(app).is_err() {
         synced.store(false, Ordering::Relaxed);
     }
 }
@@ -1411,7 +1421,7 @@ pub fn run() {
                                 .map(|preference| preference.enabled)
                                 .unwrap_or(true);
                             if claude_enabled {
-                                sync_claude_hooks(&claude_sync_loop);
+                                sync_claude_hooks(&handle, &claude_sync_loop);
                             }
                             let opencode_enabled = s
                                 .config
