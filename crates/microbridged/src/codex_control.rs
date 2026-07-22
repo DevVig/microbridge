@@ -131,45 +131,111 @@ async fn dispatch_action(session_id: &str, action: Action) -> Result<(), String>
             // turnId optional in some builds; send threadId and let server resolve.
             proxy_rpc(&sock, "turn/interrupt", json!({ "threadId": thread_id })).await
         }
-        Action::Approve => match proxy_rpc(
-            &sock,
-            "item/commandExecution/requestApproval",
-            json!({
-                "threadId": thread_id,
-                "decision": "accept",
-            }),
-        )
-        .await
-        {
-            Ok(()) => Ok(()),
-            Err(_) => poll_and_respond_approval(&sock, thread_id, "accept").await,
-        },
-        Action::Reject => match proxy_rpc(
-            &sock,
-            "item/commandExecution/requestApproval",
-            json!({
-                "threadId": thread_id,
-                "decision": "decline",
-            }),
-        )
-        .await
-        {
-            Ok(()) => Ok(()),
-            Err(_) => poll_and_respond_approval(&sock, thread_id, "decline").await,
-        },
+        Action::Approve => respond_to_pending_approval(&sock, thread_id, "accept").await,
+        Action::Reject => respond_to_pending_approval(&sock, thread_id, "decline").await,
         other => Err(format!("Codex control does not handle {other:?}.")),
     }
 }
 
-async fn poll_and_respond_approval(
-    _sock: &Path,
-    _thread_id: &str,
-    _decision: &str,
+/// Attach to the app-server proxy and reply to a server-initiated
+/// `item/commandExecution/requestApproval` request (not invent a client call).
+async fn respond_to_pending_approval(
+    sock: &Path,
+    thread_id: &str,
+    decision: &str,
 ) -> Result<(), String> {
-    Err(
-        "Approval response needs a live app-server request id. Keep the approval prompt open and ensure Codex app-server owns this thread."
-            .into(),
+    let mut child = Command::new("codex")
+        .args(["app-server", "proxy", "--sock", &sock.to_string_lossy()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("could not attach via `codex app-server proxy`: {error}"))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Codex proxy stdin unavailable.".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Codex proxy stdout unavailable.".to_string())?;
+    let mut reader = BufReader::new(stdout);
+
+    let init_id = 1u64;
+    write_rpc(
+        &mut stdin,
+        init_id,
+        "initialize",
+        json!({
+            "clientInfo": { "name": "microbridge", "version": env!("CARGO_PKG_VERSION") }
+        }),
     )
+    .await?;
+    let _ = read_rpc_response(&mut reader, init_id).await?;
+
+    let note = json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} });
+    stdin
+        .write_all(format!("{note}\n").as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    stdin.flush().await.map_err(|e| e.to_string())?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            let _ = child.kill().await;
+            return Err(
+                "No pending Codex approval request seen on the app-server socket. Keep the approval prompt open, then press Approve/Reject again."
+                    .into(),
+            );
+        }
+        let mut line = String::new();
+        let n = tokio::time::timeout(remaining, reader.read_line(&mut line))
+            .await
+            .map_err(|_| {
+                "Timed out waiting for Codex approval request on the app-server proxy.".to_string()
+            })?
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            let _ = child.kill().await;
+            return Err("Codex app-server proxy closed before an approval request arrived.".into());
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        let method = value.get("method").and_then(Value::as_str).unwrap_or("");
+        if !method.contains("requestApproval") {
+            continue;
+        }
+        let Some(req_id) = value.get("id").cloned() else {
+            continue;
+        };
+        let params = value.get("params").cloned().unwrap_or(json!({}));
+        let matches_thread = params
+            .get("threadId")
+            .or_else(|| params.get("thread_id"))
+            .and_then(Value::as_str)
+            .map(|id| id == thread_id)
+            .unwrap_or(true);
+        if !matches_thread {
+            continue;
+        }
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": { "decision": decision }
+        });
+        stdin
+            .write_all(format!("{response}\n").as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())?;
+        let _ = child.kill().await;
+        return Ok(());
+    }
 }
 
 async fn proxy_rpc(sock: &Path, method: &str, params: Value) -> Result<(), String> {

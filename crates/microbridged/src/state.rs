@@ -45,6 +45,9 @@ pub struct DaemonState {
     /// claims the same runtime + working directory. This makes the host card
     /// authoritative without losing the raw session when the host closes.
     observed_sessions: HashMap<String, ObservedSession>,
+    /// Owner conn_id recorded when each observation was upserted (control planes
+    /// must survive hosted reconcile, which must not force owner `0`).
+    observed_session_owners: HashMap<String, u64>,
     hosted_claims: HashMap<u64, HashSet<SessionContext>>,
     last_agent_key_press: [Option<Instant>; AGENT_KEY_COUNT],
     last_leds: LedFrame,
@@ -65,6 +68,7 @@ impl DaemonState {
             adapters,
             leased_sessions: HashMap::new(),
             observed_sessions: HashMap::new(),
+            observed_session_owners: HashMap::new(),
             hosted_claims: HashMap::new(),
             last_agent_key_press: [None; AGENT_KEY_COUNT],
             last_leds: LedFrame::default(),
@@ -115,6 +119,7 @@ impl DaemonState {
         }
         let id = observed.session.id.clone();
         self.observed_sessions.insert(id.clone(), observed.clone());
+        self.observed_session_owners.insert(id.clone(), owner);
         if self.observation_is_hosted(&observed) {
             if self.registry.sessions.contains_key(&id) {
                 self.remove_session(&id);
@@ -138,6 +143,7 @@ impl DaemonState {
 
     pub fn remove_observed_session(&mut self, id: &str) {
         self.observed_sessions.remove(id);
+        self.observed_session_owners.remove(id);
         self.remove_session(id);
     }
 
@@ -217,17 +223,26 @@ impl DaemonState {
     }
 
     fn reconcile_observed_sessions(&mut self) {
-        let observations = self.observed_sessions.values().cloned().collect::<Vec<_>>();
-        for observed in observations {
-            let id = observed.session.id.clone();
+        let observations = self
+            .observed_sessions
+            .iter()
+            .map(|(id, observed)| {
+                (
+                    id.clone(),
+                    observed.clone(),
+                    self.observed_session_owners.get(id).copied().unwrap_or(0),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (id, observed, owner) in observations {
             if self.observation_is_hosted(&observed) {
                 if self.registry.sessions.contains_key(&id) {
                     self.remove_session(&id);
                 }
             } else if self.registry.sessions.get(&id) != Some(&observed.session)
-                || self.registry.owner_of(&id) != Some(0)
+                || self.registry.owner_of(&id) != Some(owner)
             {
-                self.upsert_session(observed.session, 0);
+                self.upsert_session(observed.session, owner);
             }
         }
     }

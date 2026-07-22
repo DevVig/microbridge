@@ -851,7 +851,11 @@ export function Settings({
                             )
                           }
                         >
-                          {guidance.title}
+                          {guidance.title === "Detected on this Mac"
+                            ? "Install integration"
+                            : guidance.title.startsWith("Enable ")
+                              ? guidance.title
+                              : "Enable"}
                         </button>
                       )}
                     {guidance?.primaryAction === "open_app" && openAppLabel && (

@@ -47,7 +47,11 @@ function TileFace({
         <span
           className={`mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full${
             light === "green" || busy ? " mb-status-pulse" : ""
-          }${light === "yellow" && label.toLowerCase().includes("connect") ? " mb-status-pulse" : ""}`}
+          }${
+            light === "yellow" && /\bconnecting\b/i.test(label)
+              ? " mb-status-pulse"
+              : ""
+          }`}
           style={{ backgroundColor: colors.dot }}
           aria-hidden
         />

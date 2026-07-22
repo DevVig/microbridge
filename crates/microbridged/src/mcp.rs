@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mb_adapters::ObservedSession;
 use mb_protocol::{AdapterCapabilities, AdapterConnectionState, AgentState, SessionStatus};
@@ -86,11 +86,18 @@ fn host_is_loopback(host: &str) -> bool {
     matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
 }
 
+const MCP_MAX_HEADERS: usize = 64 * 1024;
+const MCP_MAX_BODY: usize = 256 * 1024;
+const MCP_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
 async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Option<(String, Vec<u8>)> {
     let mut buf = Vec::with_capacity(8192);
     let mut tmp = [0u8; 4096];
     loop {
-        let n = stream.read(&mut tmp).await.ok()?;
+        let n = tokio::time::timeout(MCP_READ_TIMEOUT, stream.read(&mut tmp))
+            .await
+            .ok()?
+            .ok()?;
         if n == 0 {
             break;
         }
@@ -101,12 +108,21 @@ async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Option<(String
             let content_length = header_value(&headers, "Content-Length")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(0);
+            if content_length > MCP_MAX_BODY {
+                return None;
+            }
             while buf.len() < header_end + content_length {
-                let n = stream.read(&mut tmp).await.ok()?;
+                let n = tokio::time::timeout(MCP_READ_TIMEOUT, stream.read(&mut tmp))
+                    .await
+                    .ok()?
+                    .ok()?;
                 if n == 0 {
                     break;
                 }
                 buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > header_end + MCP_MAX_BODY {
+                    return None;
+                }
             }
             let body = buf
                 .get(header_end..header_end + content_length)
@@ -114,7 +130,7 @@ async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Option<(String
                 .to_vec();
             return Some((headers, body));
         }
-        if buf.len() > 1024 * 1024 {
+        if buf.len() > MCP_MAX_HEADERS {
             return None;
         }
     }

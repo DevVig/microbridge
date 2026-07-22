@@ -173,10 +173,12 @@ export function integrationView(
   }
 
   const light = lightForState(adapter.state);
-  // Lifecycle-only community links (esp. Cursor) should not read as broken Limited.
+  // Lifecycle-only adapters (Cursor Connected promotion, Limited, etc.) should not
+  // read as broken — show Connected · lifecycle when observation is the only lever.
   if (
-    adapter.state === "limited" &&
-    adapter.capabilities.lifecycle_observation
+    adapter.capabilities.lifecycle_observation &&
+    !adapter.capabilities.approval_acceptance &&
+    (adapter.state === "limited" || adapter.state === "connected")
   ) {
     return {
       light: "green",

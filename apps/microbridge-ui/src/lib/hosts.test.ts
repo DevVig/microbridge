@@ -85,7 +85,55 @@ describe("integrationView", () => {
       [],
     );
     expect(view.light).toBe("green");
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.connectedGroup).toBe(true);
+  });
+
+  it("labels Claude with approval levers as Connected", () => {
+    const view = integrationView(
+      adapter({
+        id: "claude",
+        display_name: "Claude Code",
+        state: "connected",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: true,
+          approval_rejection: true,
+          interrupt: true,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
+      }),
+      [],
+    );
+    expect(view.light).toBe("green");
     expect(view.label).toBe("Connected");
+  });
+
+  it("labels Cursor connected lifecycle-only as Connected · lifecycle", () => {
+    const view = integrationView(
+      adapter({
+        id: "cursor",
+        display_name: "Cursor",
+        kind: "community",
+        state: "connected",
+        diagnostic: "Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet.",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: false,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
+      }),
+      [],
+    );
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.light).toBe("green");
+    expect(view.connectedGroup).toBe(true);
   });
 
   it("puts limited adapters in the Connected group", () => {
