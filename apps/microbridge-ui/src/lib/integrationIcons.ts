@@ -18,6 +18,7 @@ export const INTEGRATION_ICONS: Record<string, string> = {
   codex,
   conductor,
   cursor,
+  cursor_acp: cursor,
   factory,
   opencode,
   synara,

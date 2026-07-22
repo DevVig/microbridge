@@ -164,7 +164,7 @@ the software twin and physical device cannot drift between full snapshots.
 invalidation token:
 
 ```json
-{"kind":"adapters_changed","adapters":[{"id":"cursor","display_name":"Cursor","kind":"community","state":"limited","capabilities":{"lifecycle_observation":true},"diagnostic":"Lifecycle connected; IDE controls remain unavailable."}]}
+{"kind":"adapters_changed","adapters":[{"id":"cursor","display_name":"Cursor","kind":"community","state":"connected","capabilities":{"lifecycle_observation":true},"diagnostic":"Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet."}]}
 ```
 
 Clients replace their current adapter list with this payload. Missing

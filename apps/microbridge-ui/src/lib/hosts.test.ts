@@ -54,14 +54,14 @@ describe("integrationView", () => {
     expect(view.diagnostic).toContain("no separate adapter");
   });
 
-  it("marks Synara idle when there are no sessions", () => {
+  it("marks Synara ready when there are no sessions", () => {
     const view = integrationView(
       adapter({ id: "synara", display_name: "Synara", state: "connected" }),
       [],
     );
-    expect(view.light).toBe("yellow");
-    expect(view.label).toBe("Idle");
-    expect(view.connectedGroup).toBe(false);
+    expect(view.label).toBe("Ready · idle");
+    expect(view.light).toBe("green");
+    expect(view.connectedGroup).toBe(true);
   });
 
   it("flags disabled Cursor when journal sessions already exist", () => {
@@ -85,7 +85,55 @@ describe("integrationView", () => {
       [],
     );
     expect(view.light).toBe("green");
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.connectedGroup).toBe(true);
+  });
+
+  it("labels Claude with approval levers as Connected", () => {
+    const view = integrationView(
+      adapter({
+        id: "claude",
+        display_name: "Claude Code",
+        state: "connected",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: true,
+          approval_rejection: true,
+          interrupt: true,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
+      }),
+      [],
+    );
+    expect(view.light).toBe("green");
     expect(view.label).toBe("Connected");
+  });
+
+  it("labels Cursor connected lifecycle-only as Connected · lifecycle", () => {
+    const view = integrationView(
+      adapter({
+        id: "cursor",
+        display_name: "Cursor",
+        kind: "community",
+        state: "connected",
+        diagnostic: "Lifecycle connected. Cursor IDE does not expose approve/interrupt APIs yet.",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: false,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
+      }),
+      [],
+    );
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.light).toBe("green");
+    expect(view.connectedGroup).toBe(true);
   });
 
   it("puts limited adapters in the Connected group", () => {
@@ -96,10 +144,20 @@ describe("integrationView", () => {
         kind: "community",
         state: "limited",
         diagnostic: "Lifecycle is connected; unsupported IDE commands remain disabled.",
+        capabilities: {
+          lifecycle_observation: true,
+          approval_acceptance: false,
+          approval_rejection: false,
+          interrupt: false,
+          new_session: false,
+          focus_open: false,
+          reasoning_effort: false,
+        },
       }),
       [],
     );
-    expect(view.label).toBe("Limited");
+    expect(view.label).toBe("Connected · lifecycle");
+    expect(view.light).toBe("green");
     expect(view.connectedGroup).toBe(true);
   });
 
@@ -113,8 +171,25 @@ describe("integrationView", () => {
         diagnostic: "The bundled OpenCode integration is installed.",
       }),
       [],
+      { enabled: true },
     );
     expect(view.label).toBe("Setup needed");
+    expect(view.connectedGroup).toBe(false);
+  });
+
+  it("labels auto-discovered needs_setup when disabled as Detected", () => {
+    const view = integrationView(
+      adapter({
+        id: "cursor",
+        display_name: "Cursor",
+        kind: "community",
+        state: "needs_setup",
+        diagnostic: "Cursor detected on local machine.",
+      }),
+      [],
+      { enabled: false },
+    );
+    expect(view.label).toBe("Detected — click to install");
     expect(view.connectedGroup).toBe(false);
   });
 

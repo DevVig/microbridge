@@ -45,7 +45,13 @@ function TileFace({
           </span>
         )}
         <span
-          className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full"
+          className={`mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full${
+            light === "green" || busy ? " mb-status-pulse" : ""
+          }${
+            light === "yellow" && /\bconnecting\b/i.test(label)
+              ? " mb-status-pulse"
+              : ""
+          }`}
           style={{ backgroundColor: colors.dot }}
           aria-hidden
         />
@@ -124,7 +130,7 @@ export function IntegrationCard({
     "group relative flex h-[72px] w-full cursor-pointer flex-col items-stretch justify-between rounded-xl px-2 py-1.5 text-left transition-[background-color,border-color,box-shadow,opacity]";
 
   return (
-    <li className="relative list-none">
+    <div className="relative">
       <button
         type="button"
         onClick={onSelect}
@@ -136,7 +142,7 @@ export function IntegrationCard({
       >
         {face}
       </button>
-    </li>
+    </div>
   );
 }
 
@@ -147,9 +153,16 @@ export const IntegrationDetail = forwardRef<
     iconSrc?: string;
     diagnostic: string;
     theme: ThemeTokens;
+    guidance?: { title: string; steps: string[] } | null;
+    /** Healthy connected guidance uses green; setup uses yellow. */
+    guidanceTone?: TrafficLight;
     children?: ReactNode;
   }
->(function IntegrationDetail({ name, iconSrc, diagnostic, theme, children }, ref) {
+>(function IntegrationDetail(
+  { name, iconSrc, diagnostic, theme, guidance, guidanceTone = "yellow", children },
+  ref,
+) {
+  const tone = TRAFFIC_COLORS[guidanceTone];
   return (
     <div
       ref={ref}
@@ -175,6 +188,22 @@ export const IntegrationDetail = forwardRef<
       <div className="mt-1 text-[11px]" style={{ color: theme.textSecondary }}>
         {diagnostic}
       </div>
+      {guidance && guidance.steps.length > 0 && (
+        <div
+          className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
+          style={{
+            backgroundColor: tone.bg,
+            color: tone.fg,
+          }}
+        >
+          <div className="font-medium">{guidance.title}</div>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+            {guidance.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
       {children}
     </div>
   );

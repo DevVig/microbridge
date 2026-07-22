@@ -1,12 +1,12 @@
 //! Embedded Model Context Protocol (MCP) server for Microbridge.
 //!
-//! Exposes a local HTTP JSON-RPC endpoint (`http://127.0.0.1:9190/mcp`)
-//! enabling any MCP-compatible agent (Claude Desktop, Goose, Roo Code, Continue)
-//! to report session lifecycle states and handle interactive hardware approvals.
+//! Exposes an opt-in local HTTP JSON-RPC endpoint (`http://127.0.0.1:9190/mcp`)
+//! when `MICROBRIDGE_MCP=1` and `MICROBRIDGE_MCP_TOKEN` are set. Clients must send
+//! `Authorization: Bearer <token>` and a loopback `Host` header.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mb_adapters::ObservedSession;
 use mb_protocol::{AdapterCapabilities, AdapterConnectionState, AgentState, SessionStatus};
@@ -19,8 +19,17 @@ use tracing::{info, warn};
 
 use crate::state::DaemonState;
 
-pub const MCP_OWNER: u64 = u64::MAX - 4;
+/// Distinct from Cursor ACP (`u64::MAX - 4`).
+pub const MCP_OWNER: u64 = u64::MAX - 5;
 pub const MCP_PORT: u16 = 9190;
+
+/// Opt-in only — idle TCP bind is skipped unless `MICROBRIDGE_MCP=1`.
+pub fn mcp_enabled_by_env() -> bool {
+    matches!(
+        std::env::var("MICROBRIDGE_MCP").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
 
 pub fn capabilities() -> AdapterCapabilities {
     AdapterCapabilities {
@@ -53,7 +62,106 @@ struct JsonRpcResponse {
     error: Option<Value>,
 }
 
+fn mcp_auth_token() -> Option<String> {
+    std::env::var("MICROBRIDGE_MCP_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+    for line in headers.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.eq_ignore_ascii_case(name) {
+            return Some(value.trim());
+        }
+    }
+    None
+}
+
+fn host_is_loopback(host: &str) -> bool {
+    let host = host.split(':').next().unwrap_or(host).trim();
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
+}
+
+const MCP_MAX_HEADERS: usize = 64 * 1024;
+const MCP_MAX_BODY: usize = 256 * 1024;
+const MCP_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Option<(String, Vec<u8>)> {
+    let mut buf = Vec::with_capacity(8192);
+    let mut tmp = [0u8; 4096];
+    loop {
+        let n = tokio::time::timeout(MCP_READ_TIMEOUT, stream.read(&mut tmp))
+            .await
+            .ok()?
+            .ok()?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            let header_end = pos + 4;
+            let headers = String::from_utf8_lossy(&buf[..pos]).into_owned();
+            let content_length = header_value(&headers, "Content-Length")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0);
+            if content_length > MCP_MAX_BODY {
+                return None;
+            }
+            while buf.len() < header_end + content_length {
+                let n = tokio::time::timeout(MCP_READ_TIMEOUT, stream.read(&mut tmp))
+                    .await
+                    .ok()?
+                    .ok()?;
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > header_end + MCP_MAX_BODY {
+                    return None;
+                }
+            }
+            let body = buf
+                .get(header_end..header_end + content_length)
+                .unwrap_or(&[])
+                .to_vec();
+            return Some((headers, body));
+        }
+        if buf.len() > MCP_MAX_HEADERS {
+            return None;
+        }
+    }
+    None
+}
+
+async fn write_http(stream: &mut tokio::net::TcpStream, status: &str, body: &str) {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+}
+
+async fn write_json(stream: &mut tokio::net::TcpStream, body: &str) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+}
+
 pub fn spawn_mcp_server(shared: Arc<Mutex<DaemonState>>) {
+    if !mcp_enabled_by_env() {
+        info!("Embedded MCP server dormant (set MICROBRIDGE_MCP=1 to enable)");
+        return;
+    }
+    let Some(expected_token) = mcp_auth_token() else {
+        warn!("MICROBRIDGE_MCP=1 but MICROBRIDGE_MCP_TOKEN is unset; MCP server not started");
+        return;
+    };
     tokio::spawn(async move {
         let addr = SocketAddr::from(([127, 0, 0, 1], MCP_PORT));
         let listener = match TcpListener::bind(&addr).await {
@@ -82,34 +190,41 @@ pub fn spawn_mcp_server(shared: Arc<Mutex<DaemonState>>) {
             };
 
             let state_clone = Arc::clone(&shared);
+            let expected_token = expected_token.clone();
             tokio::spawn(async move {
-                let mut buf = vec![0u8; 8192];
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) if n > 0 => n,
-                    _ => return,
+                let Some((headers, body_bytes)) = read_http_request(&mut stream).await else {
+                    return;
                 };
-                let request_str = String::from_utf8_lossy(&buf[..n]);
+                let request_line = headers.lines().next().unwrap_or_default();
 
-                if request_str.starts_with("OPTIONS") {
-                    let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\n\r\n";
-                    let _ = stream.write_all(response.as_bytes()).await;
+                if request_line.starts_with("OPTIONS") {
+                    write_http(&mut stream, "204 No Content", "").await;
                     return;
                 }
 
-                if !request_str.starts_with("POST") {
-                    let response =
-                        "HTTP/1.1 404 Not Found\r\nContent-Length: 26\r\n\r\nEndpoint is POST /mcp";
-                    let _ = stream.write_all(response.as_bytes()).await;
+                if !request_line.starts_with("POST") {
+                    write_http(&mut stream, "404 Not Found", "Endpoint is POST /mcp").await;
                     return;
                 }
 
-                let body = if let Some(pos) = request_str.find("\r\n\r\n") {
-                    &request_str[pos + 4..]
-                } else {
-                    ""
-                };
+                let host = header_value(&headers, "Host").unwrap_or_default();
+                if !host_is_loopback(host) {
+                    write_http(&mut stream, "403 Forbidden", "Host must be loopback").await;
+                    return;
+                }
 
-                let rpc_req: JsonRpcRequest = match serde_json::from_str(body) {
+                let auth = header_value(&headers, "Authorization").unwrap_or_default();
+                let token = auth
+                    .strip_prefix("Bearer ")
+                    .or_else(|| auth.strip_prefix("bearer "))
+                    .unwrap_or("");
+                if token != expected_token {
+                    write_http(&mut stream, "401 Unauthorized", "Invalid MCP token").await;
+                    return;
+                }
+
+                let body = String::from_utf8_lossy(&body_bytes);
+                let rpc_req: JsonRpcRequest = match serde_json::from_str(&body) {
                     Ok(parsed) => parsed,
                     Err(err) => {
                         let resp = json!({
@@ -118,23 +233,13 @@ pub fn spawn_mcp_server(shared: Arc<Mutex<DaemonState>>) {
                             "error": { "code": -32700, "message": format!("Parse error: {}", err) }
                         })
                         .to_string();
-                        let http_resp = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                            resp.len(),
-                            resp
-                        );
-                        let _ = stream.write_all(http_resp.as_bytes()).await;
+                        write_json(&mut stream, &resp).await;
                         return;
                     }
                 };
 
                 let response_body = process_mcp_rpc(state_clone, rpc_req).await;
-                let http_resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
-                    response_body.len(),
-                    response_body
-                );
-                let _ = stream.write_all(http_resp.as_bytes()).await;
+                write_json(&mut stream, &response_body).await;
             });
         }
     });
@@ -174,7 +279,7 @@ async fn process_mcp_rpc(state: Arc<Mutex<DaemonState>>, req: JsonRpcRequest) ->
                 },
                 {
                     "name": "microbridge_request_approval",
-                    "description": "Trigger hardware approval prompt on Microbridge deck and wait for user keypress",
+                    "description": "Fire-and-forget: show an approval prompt on the Microbridge deck (does not block for the keypress; poll session state or listen on the bus for Approve/Reject)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -313,7 +418,10 @@ async fn handle_tool_call(
             Ok(json!({
                 "content": [{
                     "type": "text",
-                    "text": format!("Approval prompt displayed on Microbridge deck for session {}", session_id)
+                    "text": format!(
+                        "Approval prompt displayed on Microbridge deck for session {} (fire-and-forget; not waiting for keypress)",
+                        session_id
+                    )
                 }]
             }))
         }

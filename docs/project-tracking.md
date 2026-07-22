@@ -18,6 +18,13 @@ That creates the project, marks Phase A items Done (already shipped in `v0.1.0`)
 leaves the native action pipeline open, and files Phase B HID issues with
 `Blocked Dependency` until the Micro arrives (2026-07-22).
 
+Related Linear tracking (Cursor ≈ Claude path):
+
+- [VIGDEV-795](https://linear.app/vigdev/issue/VIGDEV-795/microbridge-native-action-pipeline-claudecodex-approverejectinterrupt) — Native Claude/Codex action pipeline (Codex app-server attach + Claude PermissionRequest hooks)
+- [VIGDEV-796](https://linear.app/vigdev/issue/VIGDEV-796/microbridge-cursor-acp-control-plane-session-binding-and-effort) — Cursor ACP session binding / effort
+
+**Deferred until existing 12 integrations are lever-complete:** Zed Settings card, then Cmux. Do not start those adapters yet.
+
 ## Phases
 
 | Phase | Window | Focus |

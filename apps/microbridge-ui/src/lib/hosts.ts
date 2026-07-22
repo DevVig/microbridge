@@ -92,10 +92,14 @@ function connectedGroupForState(state: AdapterConnectionState): boolean {
 /**
  * Derive the card's traffic light, label, and diagnostic from daemon adapter
  * state plus live session attribution.
+ *
+ * Pass `enabled` from config when known so auto-discovered (needs_setup + not
+ * enabled) tiles read as “Detected — click to install” instead of “Setup needed”.
  */
 export function integrationView(
   adapter: AdapterStatus,
   sessions: SessionStatus[],
+  options?: { enabled?: boolean },
 ): IntegrationView {
   const journalApp = journalAppFor(adapter.id);
   const presence = journalApp
@@ -131,12 +135,13 @@ export function integrationView(
         connectedGroup: true,
       };
     }
+    // Healthy watcher with no sessions — Ready, not "Not connected".
     return {
-      light: "yellow",
-      label: "Idle",
+      light: "green",
+      label: "Ready · idle",
       diagnostic:
-        "via Claude & Codex journals — no separate adapter needed. Waiting for sessions.",
-      connectedGroup: false,
+        "via Claude & Codex journals — waiting for sessions (setup is fine).",
+      connectedGroup: true,
     };
   }
 
@@ -157,7 +162,31 @@ export function integrationView(
     };
   }
 
+  // Auto-discovered on disk but not yet enabled/installed via first click.
+  if (adapter.state === "needs_setup" && options?.enabled === false) {
+    return {
+      light: "yellow",
+      label: "Detected — click to install",
+      diagnostic: adapter.diagnostic,
+      connectedGroup: false,
+    };
+  }
+
   const light = lightForState(adapter.state);
+  // Lifecycle-only adapters (Cursor Connected promotion, Limited, etc.) should not
+  // read as broken — show Connected · lifecycle when observation is the only lever.
+  if (
+    adapter.capabilities.lifecycle_observation &&
+    !adapter.capabilities.approval_acceptance &&
+    (adapter.state === "limited" || adapter.state === "connected")
+  ) {
+    return {
+      light: "green",
+      label: "Connected · lifecycle",
+      diagnostic: adapter.diagnostic,
+      connectedGroup: true,
+    };
+  }
   return {
     light,
     label: STATE_LABELS[adapter.state],

@@ -5,6 +5,7 @@
 
 mod claude;
 mod codex;
+mod cursor;
 mod hosts;
 mod title;
 mod watch;
@@ -14,6 +15,7 @@ use tokio::sync::mpsc;
 
 pub use claude::spawn_claude_adapter;
 pub use codex::spawn_codex_adapter;
+pub use cursor::spawn_cursor_adapter;
 
 /// Events emitted by in-process adapters toward the daemon bus.
 #[derive(Debug, Clone)]

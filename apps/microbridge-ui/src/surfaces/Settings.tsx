@@ -37,7 +37,9 @@ import {
 } from "../lib/hosts";
 import { integrationIcon } from "../lib/integrationIcons";
 import { openHostApp, openableHostApp } from "../lib/openHostApp";
-import { setupNextStep } from "../lib/integrationSetup";
+import { integrationGuidance } from "../lib/integrationSetup";
+import { MeshBackground } from "../components/MeshBackground";
+import { agentKeyLedFrame } from "../lib/types";
 
 const LIGHTING_STATES: { id: keyof StateColors; label: string }[] = [
   { id: "idle", label: "Idle" },
@@ -67,6 +69,7 @@ const INTEGRATION_ORDER = [
   "synara",
   "conductor",
   "cursor",
+  "cursor_acp",
   "t3code",
   "factory",
   "opencode",
@@ -203,15 +206,16 @@ export function Settings({
 
   return (
     <div
-      className="flex min-h-screen w-full"
+      className="relative flex min-h-screen w-full"
       style={{
         background: dark ? "#0A0A0B" : "#E9E9E7",
         fontFamily: "Inter, system-ui, sans-serif",
         color: t.text,
       }}
     >
+      <MeshBackground dark={dark} active />
       <aside
-        className="flex w-[200px] flex-col border-r px-3 py-4"
+        className="relative z-10 flex w-[200px] flex-col border-r px-3 py-4"
         style={{
           borderColor: t.hairline,
           backgroundColor: t.panel,
@@ -242,7 +246,7 @@ export function Settings({
         </button>
       </aside>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="relative z-10 flex-1 overflow-auto p-6">
         {tab === "general" && (
           <section>
             <h1 className="text-[18px] font-semibold">General</h1>
@@ -350,10 +354,21 @@ export function Settings({
               thread.
             </p>
             <div className="mt-4 grid grid-cols-3 gap-2">
-              {snapshot.agent_key_session_ids.map((id, i) => {
+              {(() => {
+                const frame = agentKeyLedFrame(snapshot);
+                return snapshot.agent_key_session_ids.map((id, i) => {
                 const s = id
                   ? snapshot.sessions.find((x) => x.id === id)
                   : null;
+                const led = frame.keys[i];
+                const color = frame.paused ? null : (led?.color ?? null);
+                const focused = Boolean(led?.focused);
+                const pulse =
+                  s?.state === "awaiting_approval"
+                    ? "mb-led-pulse"
+                    : s?.state === "thinking" || s?.state === "working"
+                      ? "mb-led-breathe"
+                      : "";
                 return (
                   <button
                     type="button"
@@ -361,26 +376,44 @@ export function Settings({
                     disabled={!s}
                     onClick={() => onAgentKey?.(i, false)}
                     onDoubleClick={() => onAgentKey?.(i, true)}
-                    className="rounded-xl p-3"
+                    className="relative overflow-hidden rounded-xl p-3 text-left"
                     style={{
                       backgroundColor: t.panel,
-                      border: `1px solid ${t.hairline}`,
+                      border: focused
+                        ? "1.5px solid #3D7EFF"
+                        : `1px solid ${t.hairline}`,
+                      boxShadow: color ? `0 0 12px ${color}55` : undefined,
                     }}
                   >
-                    <div className="text-[11px]" style={{ color: t.textMuted }}>
+                    {color && (
+                      <span
+                        className={`pointer-events-none absolute inset-0 ${pulse}`}
+                        style={{
+                          background: `radial-gradient(circle at 50% 20%, ${color}44 0%, transparent 70%)`,
+                          opacity: Math.max(0.25, frame.brightness / 100),
+                        }}
+                        aria-hidden
+                      />
+                    )}
+                    <div
+                      className="relative text-[11px]"
+                      style={{ color: t.textMuted }}
+                    >
                       AG{i + 1}
                     </div>
                     {s ? (
                       <>
-                        <div className="mt-1 text-[12px] font-medium">{s.app}</div>
+                        <div className="relative mt-1 text-[12px] font-medium">
+                          {s.app}
+                        </div>
                         <div
-                          className="truncate text-[11px]"
+                          className="relative truncate text-[11px]"
                           style={{ color: t.textSecondary }}
                         >
                           {s.title || s.id}
                         </div>
                         <span
-                          className="mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          className={`relative mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${pulse}`}
                           style={{
                             backgroundColor: `${STATE_COLORS[s.state]}22`,
                             color: STATE_COLORS[s.state],
@@ -391,7 +424,7 @@ export function Settings({
                       </>
                     ) : (
                       <div
-                        className="mt-2 text-[12px]"
+                        className="relative mt-2 text-[12px]"
                         style={{ color: t.textMuted }}
                       >
                         Unassigned
@@ -399,7 +432,8 @@ export function Settings({
                     )}
                   </button>
                 );
-              })}
+              });
+              })()}
             </div>
 
             <h2 className="mt-6 text-[13px] font-semibold">Key source</h2>
@@ -626,7 +660,9 @@ export function Settings({
             )
             .map((adapter) => ({
               adapter,
-              view: integrationView(adapter, snapshot.sessions),
+              view: integrationView(adapter, snapshot.sessions, {
+                enabled: cfg.adapters[adapter.id]?.enabled,
+              }),
               optIn:
                 adapter.kind === "community" && !isHostAttributed(adapter.id),
             }));
@@ -646,8 +682,11 @@ export function Settings({
           ];
           const activeId = selectedIntegration;
           const selected = views.find((item) => item.adapter.id === activeId);
-          const nextStep = selected
-            ? setupNextStep(selected.adapter.id)
+          const guidance = selected
+            ? integrationGuidance(selected.adapter.id, selected.adapter.state, {
+                enabled: cfg.adapters[selected.adapter.id]?.enabled,
+                label: selected.view.label,
+              })
             : null;
           const openAppLabel = selected
             ? openableHostApp(selected.adapter.id)
@@ -656,15 +695,16 @@ export function Settings({
           <section>
             <h1 className="text-[18px] font-semibold">Integrations</h1>
             <p className="mt-1 text-[12.5px]" style={{ color: t.textSecondary }}>
-              Click any tile for details. Cursor, Factory, T3 Code, and OpenCode
-              install on first click when they&apos;re off; they turn green or
-              Limited only after that host talks to Microbridge (reload /
-              restart / pair).
+              Click any tile for details and next steps. Cursor, Factory, T3
+              Code, and OpenCode install on first click when they&apos;re off;
+              they turn green or Limited only after that host talks to
+              Microbridge (reload / restart / pair).
             </p>
             <p className="mt-2 text-[11px]" style={{ color: t.textMuted }}>
-              Synara and the desktop apps share Claude/Codex journals — no
-              separate adapter. For T3 controls, enable Network access in T3 Code
-              Settings → Connections, then paste a pairing link below.
+              Synara and the desktop apps share Claude/Codex journals — Idle
+              means waiting for sessions, not a broken setup. For T3 controls,
+              enable Network access in T3 Code Settings → Connections, then
+              paste a pairing link below.
             </p>
             {adapterMessage && (
               <p className="mt-3 rounded-lg px-3 py-2 text-[11px]" style={{ backgroundColor: t.hoverBg }}>
@@ -702,7 +742,12 @@ export function Settings({
                       busy={adapterBusy.has(adapter.id)}
                       onSelect={() => {
                         selectIntegration(adapter.id);
-                        if (optIn && adapter.state === "disabled") {
+                        if (
+                          optIn &&
+                          (adapter.state === "disabled" ||
+                            (adapter.state === "needs_setup" &&
+                              cfg.adapters[adapter.id]?.enabled === false))
+                        ) {
                           requestAnimationFrame(() => {
                             void runAdapterOperation(adapter.id, () =>
                               setAdapterEnabled(adapter.id, true),
@@ -736,30 +781,15 @@ export function Settings({
                 iconSrc={integrationIcon(selected.adapter.id)}
                 diagnostic={selected.view.diagnostic}
                 theme={t}
+                guidance={
+                  guidance
+                    ? { title: guidance.title, steps: guidance.steps }
+                    : null
+                }
+                guidanceTone={
+                  selected.view.light === "green" ? "green" : "yellow"
+                }
               >
-                  {(selected.adapter.state === "needs_setup" ||
-                    selected.adapter.state === "disabled") &&
-                    nextStep && (
-                    <div
-                      className="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
-                      style={{
-                        backgroundColor: TRAFFIC_COLORS.yellow.bg,
-                        color: TRAFFIC_COLORS.yellow.fg,
-                      }}
-                    >
-                      <div className="font-medium">
-                        {selected.adapter.state === "disabled"
-                          ? "Do this next (after install)"
-                          : "Do this next"}
-                      </div>
-                      <p className="mt-1">{nextStep}</p>
-                      {selected.adapter.state === "needs_setup" && (
-                        <p className="mt-1 opacity-90">
-                          {selected.view.diagnostic}
-                        </p>
-                      )}
-                    </div>
-                  )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {CAPABILITIES.map((capability) => (
                       <span
@@ -803,7 +833,46 @@ export function Settings({
                     </div>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {openAppLabel && (
+                    {guidance?.primaryAction === "enable" &&
+                      selected.adapter.kind === "community" &&
+                      !cfg.adapters[selected.adapter.id]?.enabled && (
+                        <button
+                          type="button"
+                          disabled={adapterBusy.has(selected.adapter.id)}
+                          className="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
+                          style={{
+                            backgroundColor: TRAFFIC_COLORS.green.bg,
+                            color: TRAFFIC_COLORS.green.fg,
+                            border: `1px solid ${TRAFFIC_COLORS.green.dot}55`,
+                          }}
+                          onClick={() =>
+                            void runAdapterOperation(selected.adapter.id, () =>
+                              setAdapterEnabled(selected.adapter.id, true),
+                            )
+                          }
+                        >
+                          {guidance.title === "Detected on this Mac"
+                            ? "Install integration"
+                            : guidance.title.startsWith("Enable ")
+                              ? guidance.title
+                              : "Enable"}
+                        </button>
+                      )}
+                    {guidance?.primaryAction === "open_app" && openAppLabel && (
+                      <button
+                        type="button"
+                        className="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
+                        style={{
+                          backgroundColor: TRAFFIC_COLORS.green.bg,
+                          color: TRAFFIC_COLORS.green.fg,
+                          border: `1px solid ${TRAFFIC_COLORS.green.dot}55`,
+                        }}
+                        onClick={() => void openHostApp(selected.adapter.id)}
+                      >
+                        Open {openAppLabel}
+                      </button>
+                    )}
+                    {openAppLabel && guidance?.primaryAction !== "open_app" && (
                       <button
                         type="button"
                         className="rounded-lg px-3 py-1.5 text-[11px] font-medium"
@@ -813,7 +882,7 @@ export function Settings({
                         Open {openAppLabel}
                       </button>
                     )}
-                    {selected.adapter.kind === "community" && !cfg.adapters[selected.adapter.id]?.enabled && (
+                    {selected.adapter.kind === "community" && !cfg.adapters[selected.adapter.id]?.enabled && guidance?.primaryAction !== "enable" && (
                       <button
                         type="button"
                         disabled={adapterBusy.has(selected.adapter.id)}
@@ -825,6 +894,8 @@ export function Settings({
                       >
                         {selected.adapter.id === "cursor"
                           ? "Enable Cursor"
+                          : selected.adapter.id === "cursor_acp"
+                            ? "Enable Cursor Agent (ACP)"
                           : selected.adapter.id === "factory"
                             ? "Enable Factory"
                             : selected.adapter.id === "opencode"

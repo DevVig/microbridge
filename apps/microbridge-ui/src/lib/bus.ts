@@ -199,6 +199,22 @@ const DEMO: Snapshot = {
       diagnostic: "Disabled until you explicitly enable this integration.",
     },
     {
+      id: "cursor_acp",
+      display_name: "Cursor Agent (ACP)",
+      kind: "community",
+      state: "disabled",
+      capabilities: {
+        lifecycle_observation: false,
+        approval_acceptance: false,
+        approval_rejection: false,
+        interrupt: false,
+        new_session: false,
+        focus_open: false,
+        reasoning_effort: false,
+      },
+      diagnostic: "Disabled until you explicitly enable this integration.",
+    },
+    {
       id: "t3code",
       display_name: "T3 Code",
       kind: "community",

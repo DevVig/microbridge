@@ -2,8 +2,11 @@
 
 pub mod app_match;
 pub mod auto_discover;
+pub mod claude_control;
 pub mod cnvs;
+pub mod codex_control;
 pub mod config;
+pub mod cursor_acp;
 pub mod factory;
 pub mod frontmost;
 pub mod key_source;
