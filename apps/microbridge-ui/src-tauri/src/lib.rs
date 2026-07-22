@@ -555,7 +555,8 @@ fn install_claude_hooks() -> Result<PathBuf, String> {
     let settings_path = PathBuf::from(&home).join(".claude").join("settings.json");
     let mut settings = if settings_path.is_file() {
         let text = fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
+        serde_json::from_str(&text)
+            .map_err(|e| format!("parse {}: {e}", settings_path.display()))?
     } else {
         serde_json::json!({})
     };
@@ -574,15 +575,28 @@ fn install_claude_hooks() -> Result<PathBuf, String> {
         "hooks": [{ "type": "command", "command": pretool }]
     }]);
     let mut changed = false;
+    let mb_owned_or_empty = |existing: &serde_json::Value| {
+        let text = existing.to_string();
+        text.contains("microbridge-permission")
+            || existing.as_array().is_some_and(|a| a.is_empty())
+    };
     if hooks_obj.get("PermissionRequest") != Some(&permission_entry) {
-        hooks_obj.insert("PermissionRequest".into(), permission_entry);
-        changed = true;
+        let existing = hooks_obj
+            .get("PermissionRequest")
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
+        if mb_owned_or_empty(&existing) {
+            hooks_obj.insert("PermissionRequest".into(), permission_entry);
+            changed = true;
+        }
     }
     if hooks_obj.get("PreToolUse") != Some(&pretool_entry) {
         // Merge carefully: only replace if empty or already Microbridge-owned.
-        let existing = hooks_obj.get("PreToolUse").cloned().unwrap_or(serde_json::json!([]));
-        let text = existing.to_string();
-        if text.contains("microbridge-permission") || existing.as_array().is_some_and(|a| a.is_empty()) {
+        let existing = hooks_obj
+            .get("PreToolUse")
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
+        if mb_owned_or_empty(&existing) {
             hooks_obj.insert("PreToolUse".into(), pretool_entry);
             changed = true;
         }

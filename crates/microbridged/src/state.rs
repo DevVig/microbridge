@@ -13,7 +13,7 @@ use mb_protocol::{
     AGENT_KEY_COUNT,
 };
 use tokio::sync::{mpsc, Mutex};
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::config::save_config;
 use crate::registry::Registry;
@@ -655,6 +655,11 @@ impl DaemonState {
         if action == Action::OpenFocusedThread {
             let uri: Option<String> = session.focus_uri.clone().or_else(|| {
                 let cwd = session.id.split(':').nth(1)?;
+                // Only synthesize file://-style deep links from absolute paths.
+                // Conversation IDs and other opaque segments must not become `cursor://file…`.
+                if !cwd.starts_with('/') {
+                    return None;
+                }
                 match session.app.as_str() {
                     "Cursor" => Some(format!("cursor://file{}", cwd)),
                     "VS Code" => Some(format!("vscode://file{}", cwd)),
@@ -667,7 +672,7 @@ impl DaemonState {
                 #[cfg(target_os = "macos")]
                 {
                     let _ = std::process::Command::new("open").arg(&url).spawn();
-                    info!(url = %url, session_id, "Launched deep-link focus URI");
+                    tracing::info!(url = %url, session_id, "Launched deep-link focus URI");
                     return Ok(());
                 }
                 #[cfg(not(target_os = "macos"))]
