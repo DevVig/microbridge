@@ -1,6 +1,6 @@
 [package]
 name = "microbridge-ui"
-version = "0.3.9"
+version = "0.3.10"
 description = "Microbridge menu bar app (primary UI)"
 authors = ["Microbridge contributors"]
 edition = "2021"
@@ -26,5 +26,11 @@ mb-protocol = { path = "../../../crates/mb-protocol" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-service-management = "0.3.2"
+
+[profile.release]
+# Cargo's macOS debuginfo strip pass can leave freshly built proc-macro dylibs
+# unloadable before the app itself links. Release builds do not emit debug info,
+# so skipping that redundant pass keeps clean Tauri builds deterministic.
+strip = false
 
 [workspace]
