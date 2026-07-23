@@ -4,7 +4,7 @@
 
 | Component | Runs as | Language | Required? |
 |---|---|---|---|
-| `microbridged` | resident daemon (launchd agent) | Rust | yes |
+| `microbridged` | app-owned child (standard GUI) or launchd service (explicit headless mode) | Rust | yes |
 | First-party integrations (ChatGPT, Claude Desktop, Codex CLI, Claude Code, CNVS, Synara/Conductor attribution) | in-process modules of the daemon | Rust | bundled |
 | Managed integrations (OpenCode, Cursor, Factory, T3 Code) | host plugins/hooks or socket clients | Rust/Node | opt-in |
 | Community integrations | separate processes on the socket | any | optional |
@@ -14,6 +14,12 @@ The daemon owns three things: the **status bus** (session registry fed by
 adapters), the **focus policy** (which session owns the deck), and the
 **device layer** (LED frames out, key events in). Integrations never touch the
 device — see [protocol.md](protocol.md).
+
+On macOS, the signed menu-bar app is the only standard Login Item and starts
+the bundled daemon for its own lifetime. Legacy UI/daemon LaunchAgents migrate
+only after the native login item and bundled socket are proven working. Users
+who deliberately enable the Homebrew headless service may still have a separate
+daemon background item.
 
 ## Footprint budget
 

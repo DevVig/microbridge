@@ -364,11 +364,12 @@ jobs:
             ```sh
             brew tap DevVig/microbridge https://github.com/DevVig/microbridge
             brew install microbridge
-            brew services start microbridge
-            open ~/Applications/Microbridge.app
+            microbridge-app install
             ```
 
-            Upgrade later: `brew update && brew upgrade microbridge`
+            Upgrade later: `brew update && brew upgrade microbridge && microbridge-app install`
+
+            Headless-only daemon service: `brew services start microbridge`
 
             ### Signed + notarized DMG
 

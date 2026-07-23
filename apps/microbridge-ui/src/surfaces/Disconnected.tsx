@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
 import { DARK, LIGHT, type ThemeTokens } from "../lib/theme";
 import { usePopoverFit } from "../lib/popoverFit";
-import { updateChannel, type UpdateChannel } from "../lib/updater";
 
 /**
  * Shown when microbridged hasn't sent a snapshot yet.
@@ -30,22 +28,6 @@ export function Disconnected({
   const { ref: cardRef, maxHeight } = usePopoverFit<HTMLDivElement>(
     view === "popover",
   );
-  const [channel, setChannel] = useState<UpdateChannel | null>(null);
-
-  useEffect(() => {
-    void updateChannel().then(setChannel);
-  }, []);
-
-  // Homebrew owns the daemon as a service; direct installs get the launchd
-  // agent written by install.sh. Showing the wrong one is worse than waiting,
-  // so hold the command back until the channel is known.
-  const startCommand =
-    channel === "brew"
-      ? "brew services start microbridge"
-      : channel === "direct"
-        ? "launchctl kickstart -k gui/$(id -u)/ai.microbridge.daemon"
-        : null;
-
   return (
     <div
       className="flex h-screen w-full items-start justify-center bg-transparent pt-1"
@@ -89,17 +71,9 @@ export function Disconnected({
             style={{ color: t.textSecondary }}
           >
             The menu bar app reads your sessions from the local daemon. It isn't
-            answering yet — start it and this window fills in on its own.
+            answering yet. Quit and reopen Microbridge to restart its bundled
+            daemon; this window fills in as soon as the local socket is ready.
           </p>
-
-          {startCommand && (
-            <pre
-              className="mt-3 overflow-x-auto rounded-lg px-3 py-2 text-[11px]"
-              style={{ backgroundColor: t.sunken, color: t.text }}
-            >
-              {startCommand}
-            </pre>
-          )}
         </div>
 
         <div

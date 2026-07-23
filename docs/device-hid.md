@@ -98,8 +98,10 @@ Effects: `off=0`, `solid=1`, `snake=2`, `rainbow=3`, `breath=4`,
 
 ## Claiming the device
 
-Default daemon behavior: **probe only** (Detected). Enable **Settings → Device
-→ Hardware control** to claim the interface and apply changes immediately.
+Default daemon behavior: **probe only** (Detected). Choose **Claim Codex Micro**
+in the home popover or the menu-bar icon’s right-click menu. The same advanced
+control remains under **Settings → Device**. A requested claim that remains
+Detected can be retried after closing the other HID owner.
 For command-line diagnostics:
 
 ```bash

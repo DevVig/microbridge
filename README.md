@@ -115,16 +115,20 @@ separate daemon or Marketplace plugin download is required.
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
-brew services start microbridge
-open ~/Applications/Microbridge.app
-# updates: brew update && brew upgrade microbridge
+microbridge-app install
+# updates: brew update && brew upgrade microbridge && microbridge-app install
 # optional background updates: brew autoupdate start --upgrade --cleanup
 ```
+
+The menu-bar app owns its bundled daemon. `brew services start microbridge`
+remains available as an explicit headless mode and creates a separate background
+item.
 
 From source / Linux:
 
 ```sh
-./scripts/install.sh                 # macOS launchd
+./scripts/install.sh                 # macOS app + app-owned daemon
+./scripts/install.sh --no-ui         # macOS headless launchd service
 ./scripts/install-linux-systemd.sh   # Linux systemd --user
 ```
 

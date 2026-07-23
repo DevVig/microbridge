@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Download a GitHub Release archive and install the menu bar app + daemon
-# (+ launchd on macOS). Not a CLI-only install.
+# Download a GitHub Release archive and install the menu bar app + daemon.
+# The GUI owns its bundled daemon; launchd is reserved for explicit headless installs.
 set -euo pipefail
 
 REPO="${MICROBRIDGE_REPO:-DevVig/microbridge}"
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 TAG="${1:-}"
-LABEL="ai.microbridge.daemon"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -69,59 +68,32 @@ install -m 755 "$BIN_SRC" "$BIN_DIR/microbridged"
 install -m 755 "$CTL_SRC" "$BIN_DIR/microbridgectl"
 
 if [[ "$OS" == "Darwin" ]]; then
-  PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-  mkdir -p "$HOME/Library/LaunchAgents"
-  cat >"$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${BIN_DIR}/microbridged</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>${HOME}/.microbridge/daemon.log</string>
-  <key>StandardErrorPath</key>
-  <string>${HOME}/.microbridge/daemon.log</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>HOME</key>
-    <string>${HOME}</string>
-    <key>PATH</key>
-    <string>${BIN_DIR}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
-  </dict>
-</dict>
-</plist>
-EOF
-  launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  launchctl enable "gui/$(id -u)/${LABEL}"
-  launchctl kickstart -k "gui/$(id -u)/${LABEL}"
-
   DEST="$HOME/Applications/Microbridge.app"
-  MARKER="$DEST/.microbridge-release"
+  MARKER="$HOME/Applications/.Microbridge.app.microbridge-release"
+  LEGACY_MARKER="$DEST/.microbridge-release"
   install_app_bundle() {
     local APP_SRC="$1"
-    if [[ -d "$DEST" && ! -f "$MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
+    if [[ -d "$DEST" && ! -f "$MARKER" && ! -f "$LEGACY_MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
       echo "    warning: $DEST exists and is not release-managed — leave it"
       echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
       return 0
     fi
-    rm -rf "$DEST"
+    local STAGING="$HOME/Applications/.Microbridge.app.installing.$$"
     mkdir -p "$HOME/Applications"
-    cp -R "$APP_SRC" "$DEST"
+    rm -rf "$STAGING"
+    /usr/bin/ditto "$APP_SRC" "$STAGING"
+    /usr/bin/codesign --verify --deep --strict "$STAGING"
+    if [[ -d "$DEST" ]]; then
+      while read -r pid; do
+        kill "$pid" 2>/dev/null || true
+      done < <(/usr/bin/pgrep -f "^${DEST}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+    fi
+    rm -rf "$DEST"
+    mv "$STAGING" "$DEST"
     xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
-    echo "owned-by-release" >"$MARKER"
-    # Launch at login is the app's job now, not the installer's — it asks on
-    # first launch and owns the ai.microbridge.ui LaunchAgent from there
-    # (Settings → General), so brew/DMG/source all behave the same.
+    touch "$MARKER"
+    rm -f "$LEGACY_MARKER"
+    # Launch at login and the bundled daemon are both owned by the app.
     open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
     echo "    installed ~/Applications/Microbridge.app"
   }

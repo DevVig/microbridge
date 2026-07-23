@@ -78,7 +78,7 @@ TOML
   echo "    wrote ~/.microbridge/config.toml"
 fi
 
-if [[ "$WITH_LAUNCHD" -eq 1 ]]; then
+if [[ "$WITH_LAUNCHD" -eq 1 && "$WITH_UI" -eq 0 ]]; then
   echo "==> Installing launchd agent ($LABEL)"
   PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
@@ -125,7 +125,11 @@ EOF
     echo "    warning: daemon not responding yet — check ~/.microbridge/daemon.log"
   fi
 else
-  echo "==> Skipping launchd (run manually: $BIN_DIR/microbridged)"
+  if [[ "$WITH_UI" -eq 1 ]]; then
+    echo "==> App-owned daemon (no separate launchd background item)"
+  else
+    echo "==> Skipping launchd (run manually: $BIN_DIR/microbridged)"
+  fi
 fi
 
 if [[ "$WITH_UI" -eq 1 ]]; then
@@ -138,15 +142,23 @@ if [[ "$WITH_UI" -eq 1 ]]; then
     if npm run tauri build; then
       APP_SRC="$(find "$ROOT/apps/microbridge-ui/src-tauri/target/release/bundle" -name 'Microbridge.app' -type d 2>/dev/null | head -n1 || true)"
       if [[ -n "$APP_SRC" && "$(uname -s)" == "Darwin" ]]; then
-        rm -rf "$HOME/Applications/Microbridge.app"
-        mkdir -p "$HOME/Applications"
-        cp -R "$APP_SRC" "$HOME/Applications/Microbridge.app"
-        echo "    installed ~/Applications/Microbridge.app"
-        # Launch at login is the app's job now, not the installer's — it asks
-        # on first launch and owns the ai.microbridge.ui LaunchAgent from there
-        # (Settings → General). Doing it here too would only have covered
-        # source installs, and would race the app for the same plist.
-        open "$HOME/Applications/Microbridge.app" 2>/dev/null || true
+        APP_DEST="$HOME/Applications/Microbridge.app"
+        APP_MARKER="$HOME/Applications/.Microbridge.app.microbridge-source"
+        if [[ -e "$APP_DEST" && ! -f "$APP_MARKER" && "${MICROBRIDGE_FORCE_APP:-}" != "1" ]]; then
+          echo "    warning: preserving unowned $APP_DEST"
+          echo "    set MICROBRIDGE_FORCE_APP=1 to replace"
+        else
+          while read -r pid; do
+            kill "$pid" 2>/dev/null || true
+          done < <(/usr/bin/pgrep -f "^${APP_DEST}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+          rm -rf "$APP_DEST"
+          mkdir -p "$HOME/Applications"
+          /usr/bin/ditto "$APP_SRC" "$APP_DEST"
+          touch "$APP_MARKER"
+          echo "    installed ~/Applications/Microbridge.app"
+          # Launch at login and the bundled daemon are both owned by the app.
+          open "$APP_DEST" 2>/dev/null || true
+        fi
       else
         echo "    note: .app bundle not found — web build is in apps/microbridge-ui/dist"
         echo "    run: cd apps/microbridge-ui && npm run tauri dev"

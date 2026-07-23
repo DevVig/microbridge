@@ -8,6 +8,7 @@ import {
 } from "../lib/threads";
 import { usePopoverFit } from "../lib/popoverFit";
 import { DeviceEcho } from "../components/DeviceEcho";
+import { hardwareControlState } from "../lib/hardwareControl";
 
 const MicroGlyph = ({ color }: { color: string }) => (
   <svg
@@ -70,6 +71,7 @@ export function Popover({
   dark,
   onOpenSettings,
   onTogglePause,
+  onHardwareControl,
   onQuit,
   onAgentKey,
 }: {
@@ -77,6 +79,7 @@ export function Popover({
   dark: boolean;
   onOpenSettings: () => void;
   onTogglePause: () => void;
+  onHardwareControl: (enabled: boolean) => void;
   onQuit: () => void;
   onAgentKey?: (index: number, open: boolean) => void;
 }) {
@@ -87,8 +90,21 @@ export function Popover({
   const daemonOffline = snapshot.device_name === "daemon-offline";
   const detected =
     !snapshot.device_connected && snapshot.device_name.includes("usb");
+  const hardwareControl = hardwareControlState(snapshot);
+  const unavailableHardwareTitle = daemonOffline
+    ? "Microbridge daemon offline"
+    : demo
+      ? "Codex Micro unavailable in browser demo"
+      : simulator
+        ? "Connect a Codex Micro"
+        : "Codex Micro not detected";
+  const unavailableHardwareDescription = daemonOffline
+    ? "Reopen Microbridge to restart its bundled daemon."
+    : demo
+      ? "Open the installed menu-bar app for live hardware control."
+      : "Connect the device over USB-C to make hardware control available.";
   // Show the live UI shell in simulator/detected modes; only "Connected"
-  // means claimed HID (not yet shipped for production hardware).
+  // means Microbridge actually owns the HID interface.
   const showLiveShell =
     snapshot.device_connected || simulator || detected;
   const chipLabel = snapshot.device_connected
@@ -194,18 +210,63 @@ export function Popover({
           </span>
         </div>
 
-        {(simulator || detected) && (
-          <p
-            className="px-4 pb-2 text-[11px] leading-snug"
-            style={{ color: t.textMuted }}
-          >
-            {demo
-              ? "Browser demo data — start microbridged + the Tauri app for a live bus."
-              : simulator
-                ? "No Micro claimed — LED frames are simulated. Enable hardware control in Device settings to connect."
-                : "USB Micro seen, but hardware control is disabled or another process owns the HID interface."}
-          </p>
-        )}
+        <div
+          className="mx-3 mb-3 flex items-center gap-3 rounded-xl px-3 py-2.5"
+          style={{
+            backgroundColor:
+              hardwareControl === "connected" ? "#30C46314" : t.sunken,
+            border: `1px solid ${
+              hardwareControl === "connected" ? "#30C46340" : t.hairline
+            }`,
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <p
+              className="text-[11.5px] font-semibold"
+              style={{ color: t.text }}
+            >
+              {hardwareControl === "connected"
+                ? "Controlled by Microbridge"
+                : hardwareControl === "claim_failed"
+                  ? "Couldn’t claim Codex Micro"
+                  : hardwareControl === "available"
+                    ? "Codex Micro ready"
+                    : unavailableHardwareTitle}
+            </p>
+            <p
+              className="mt-0.5 text-[10.5px] leading-snug"
+              style={{ color: t.textMuted }}
+            >
+              {hardwareControl === "connected"
+                ? "Keys, dial, joystick, and lighting are active."
+                : hardwareControl === "claim_failed"
+                  ? "Another app may own the HID interface. Close it, then retry."
+                  : hardwareControl === "available"
+                    ? "Let Microbridge use its keys, dial, joystick, and lighting."
+                    : unavailableHardwareDescription}
+            </p>
+          </div>
+          {hardwareControl !== "unavailable" && (
+            <button
+              type="button"
+              className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
+              style={{
+                backgroundColor:
+                  hardwareControl === "available" ? "#3478F6" : t.hoverBg,
+                color: hardwareControl === "available" ? "#FFFFFF" : t.text,
+              }}
+              onClick={() =>
+                onHardwareControl(hardwareControl !== "connected")
+              }
+            >
+              {hardwareControl === "connected"
+                ? "Release"
+                : hardwareControl === "claim_failed"
+                  ? "Retry"
+                  : "Claim"}
+            </button>
+          )}
+        </div>
 
         {showLiveShell ? (
           <>
@@ -366,7 +427,7 @@ export function Popover({
             >
               {daemonOffline
                 ? "No live daemon connection is available, so the app is showing no threads rather than simulated data."
-                : "Plug in over USB-C, then enable hardware control in Device settings. If another app owns the HID interface, Microbridge keeps observing threads without claiming the deck."}
+                : "Plug in over USB-C, then claim the Codex Micro here or from the menu-bar icon’s right-click menu. Microbridge keeps observing threads if another app owns the HID interface."}
             </p>
           </div>
         )}

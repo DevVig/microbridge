@@ -45,16 +45,14 @@ on merge, auto-merge enabled.
 ```sh
 brew tap DevVig/microbridge https://github.com/DevVig/microbridge
 brew install microbridge
-brew services start microbridge
-open ~/Applications/Microbridge.app
+microbridge-app install
 ```
 
 Updates:
 
 ```sh
 brew update && brew upgrade microbridge
-brew services restart microbridge   # apply formula changes and refresh the marker-owned app
-open ~/Applications/Microbridge.app
+microbridge-app install              # refresh the marker-owned signed app
 ```
 
 Optional background updates (Homebrew’s own updater):
@@ -62,5 +60,9 @@ Optional background updates (Homebrew’s own updater):
 ```sh
 brew autoupdate start --upgrade --cleanup --immediate
 ```
+
+The standard GUI app owns its bundled daemon. `brew services start microbridge`
+is retained as an explicit headless mode and is verified separately in release
+smokes.
 
 Details: [INSTALL.md](../INSTALL.md#homebrew-recommended-on-macos).

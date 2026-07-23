@@ -5,6 +5,7 @@ set -euo pipefail
 BIN_DIR="${MICROBRIDGE_BIN:-$HOME/.local/bin}"
 LABEL="ai.microbridge.daemon"
 UI_LABEL="ai.microbridge.ui"
+BREW_LABEL="homebrew.mxcl.microbridge"
 PURGE=0
 
 usage() {
@@ -27,11 +28,22 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "==> Stopping launchd agents"
   launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/${UI_LABEL}" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/${BREW_LABEL}" 2>/dev/null || true
   rm -f "$HOME/Library/LaunchAgents/${LABEL}.plist"
   rm -f "$HOME/Library/LaunchAgents/${UI_LABEL}.plist"
-  if [[ -d "$HOME/Applications/Microbridge.app" ]]; then
+  rm -f "$HOME/Library/LaunchAgents/${BREW_LABEL}.plist"
+  APP="$HOME/Applications/Microbridge.app"
+  SOURCE_MARKER="$HOME/Applications/.Microbridge.app.microbridge-source"
+  BREW_MARKER="$HOME/Applications/.Microbridge.app.microbridge-brew"
+  RELEASE_MARKER="$HOME/Applications/.Microbridge.app.microbridge-release"
+  if [[ -d "$APP" && ( -f "$SOURCE_MARKER" || -f "$BREW_MARKER" || -f "$RELEASE_MARKER" || -f "$APP/.microbridge-brew" || -f "$APP/.microbridge-release" ) ]]; then
     echo "==> Removing menu bar app"
-    rm -rf "$HOME/Applications/Microbridge.app"
+    "$APP/Contents/MacOS/microbridge-ui" \
+      --unregister-login-item 2>/dev/null || true
+    rm -rf "$APP"
+    rm -f "$SOURCE_MARKER" "$BREW_MARKER" "$RELEASE_MARKER"
+  elif [[ -d "$APP" ]]; then
+    echo "==> Preserving unowned $APP"
   fi
 fi
 

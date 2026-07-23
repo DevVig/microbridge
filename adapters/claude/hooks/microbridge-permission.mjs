@@ -61,7 +61,7 @@ function ingestLifecycle(id, state) {
           adapter: "claude-hook",
           protocol_version: 0,
           role: "ui",
-          adapter_version: "0.3.7",
+          adapter_version: "0.3.8",
           capabilities: {},
         },
         {

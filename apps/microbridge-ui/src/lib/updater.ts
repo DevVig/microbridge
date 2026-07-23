@@ -103,7 +103,7 @@ export async function runUpdateCheck({
       if (!silent) {
         const { message } = await import("@tauri-apps/plugin-dialog");
         await message(
-          "Microbridge was installed with Homebrew.\n\nUpdate it from Terminal:\n\n    brew update && brew upgrade microbridge",
+          "Microbridge was installed with Homebrew.\n\nUpdate and refresh the app from Terminal:\n\n    brew update && brew upgrade microbridge && microbridge-app install",
           { title: "Update Microbridge", kind: "info" },
         );
       }

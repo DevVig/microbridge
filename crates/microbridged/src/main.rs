@@ -4,6 +4,7 @@
 //! session owns the device, and renders Agent Key LEDs. Fully event-driven:
 //! the daemon does no work between messages.
 
+use std::io::Read;
 use std::sync::Arc;
 
 use mb_adapters::{spawn_claude_adapter, spawn_codex_adapter, spawn_cursor_adapter, AdapterEvent};
@@ -23,6 +24,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    let exit_with_parent = std::env::args().any(|argument| argument == "--exit-with-parent");
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -131,5 +133,22 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    serve(shared).await
+    if exit_with_parent {
+        let (parent_exit_tx, parent_exit_rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let mut stdin = std::io::stdin();
+            let mut buffer = [0_u8; 1];
+            while stdin.read(&mut buffer).is_ok_and(|read| read > 0) {}
+            let _ = parent_exit_tx.send(());
+        });
+        tokio::select! {
+            result = serve(shared) => result,
+            _ = parent_exit_rx => {
+                info!("parent app exited; stopping app-owned daemon");
+                Ok(())
+            }
+        }
+    } else {
+        serve(shared).await
+    }
 }
