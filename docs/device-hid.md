@@ -9,15 +9,18 @@ Firmware changes may invalidate this document — treat it as a living map.
 | Capability | Status |
 |---|---|
 | USB identity (VID/PID) | **known** — from ChatGPT Desktop `@worklouder/wl-device-kit` |
-| USB presence probe | macOS `system_profiler` matches VID `0x303A` + known PIDs (Detected) |
+| USB/Bluetooth presence | macOS HID registry matches VID `0x303A`, known PIDs, and vendor usage page `0xFF00` (Detected) |
 | HID claim / LED write | opt-in: build with `hid` feature (default) + Device → Hardware control; `MICROBRIDGE_HID_CLAIM=1` is a diagnostic override |
 | LED frames (6 Agent Keys) | packed as JSON-RPC `v.oai.thstatus` over framed HID reports |
 | Key / dial / joystick input | notify parsers and conservative routing map implemented (`v.oai.hid` / `v.oai.rad`); exact codes remain gated on physical capture |
-| Bluetooth | out of scope for M2 (USB-first) |
+| Bluetooth | supported when the paired Micro exposes its vendor HID interface; transport is reported separately from USB |
 
-Without a claimed device the daemon uses [`MockDevice`](../crates/mb-device/src/lib.rs)
-so CI and headless installs stay green. Detected-but-unclaimed USB still shows
-in the UI as **Detected** (not Connected).
+The daemon uses [`MockDevice`](../crates/mb-device/src/lib.rs) only when no supported
+physical device is detected, so CI and headless installs stay green. A
+detected-but-unclaimed Micro remains a `HidDevice`, preserving its
+`codex-micro-<transport>` descriptor and **Detected** UI status (not Connected).
+The daemon refreshes presence every two seconds while keeping explicit Retry
+semantics for a stable device whose claim failed.
 
 ## Source of truth (no hardware required)
 
@@ -117,7 +120,8 @@ Build flag: `mb-device` feature `hid` (on by default). Disable with
 
 - 13 mechanical switches, rotary encoder, planar joystick, capacitive touch
 - 6 frosted Agent Keys with per-key RGB
-- USB-C and BLE; Microbridge M2 targets USB only
+- USB-C and BLE; Microbridge discovers BLE when the paired device exposes its
+  vendor HID interface through the macOS HID registry
 - Also configurable via Work Louder Input / VIA for non-agent layers
 
 ## Remaining validation (needs hardware)

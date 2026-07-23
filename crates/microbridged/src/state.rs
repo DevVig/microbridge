@@ -31,6 +31,15 @@ fn should_reopen_device(previous: &DaemonConfig, next: &DaemonConfig, connected:
         || (next.hardware_control_enabled && !connected)
 }
 
+fn unrendered_led_frame() -> LedFrame {
+    LedFrame {
+        // Normalized user brightness is at most 100, so this sentinel forces
+        // one real HID write even when the resolved frame is otherwise empty.
+        brightness: u8::MAX,
+        ..LedFrame::default()
+    }
+}
+
 pub struct DaemonState {
     pub registry: Registry,
     pub config: DaemonConfig,
@@ -62,7 +71,7 @@ impl DaemonState {
     pub fn new(device: Box<dyn Device>, mut config: DaemonConfig) -> Self {
         config.normalize();
         let adapters = initial_adapter_statuses(&config);
-        Self {
+        let mut state = Self {
             registry: Registry::default(),
             config,
             device,
@@ -76,8 +85,11 @@ impl DaemonState {
             observed_session_owners: HashMap::new(),
             hosted_claims: HashMap::new(),
             last_agent_key_press: [None; AGENT_KEY_COUNT],
-            last_leds: LedFrame::default(),
-        }
+            last_leds: unrendered_led_frame(),
+        };
+        let keys = state.registry.agent_key_ids(&state.config);
+        state.render_leds(&keys);
+        state
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -303,7 +315,7 @@ impl DaemonState {
             self.device = mb_device::open_default_device_with_claim(
                 self.config.hardware_control_enabled || hid_claim_env_enabled(),
             );
-            self.last_leds = LedFrame::default();
+            self.last_leds = unrendered_led_frame();
             let descriptor = self.device.descriptor();
             self.broadcast_ui(BusEvent::DeviceChanged {
                 connected: descriptor.connected,
@@ -638,7 +650,15 @@ impl DaemonState {
     pub fn render_leds(&mut self, keys: &[Option<String>; AGENT_KEY_COUNT]) {
         let frame = self.resolved_led_frame(keys);
         if frame != self.last_leds {
+            let before = self.device.descriptor();
             self.device.set_leds(&frame);
+            let after = self.device.descriptor();
+            if before.connected != after.connected || before.name != after.name {
+                self.broadcast_ui(BusEvent::DeviceChanged {
+                    connected: after.connected,
+                    name: after.name,
+                });
+            }
             self.last_leds = frame;
         }
     }
@@ -800,6 +820,82 @@ impl DaemonState {
             };
             self.handle_device_input(input);
         }
+    }
+
+    /// Refresh physical presence without repeatedly retrying a failed claim.
+    /// The 2-second caller cadence is only for hot-plug discovery; stable
+    /// detected/connected devices keep their existing handle.
+    pub fn refresh_device_presence(&mut self) {
+        self.refresh_device_presence_with(mb_device::open_default_device_with_claim);
+    }
+
+    fn refresh_device_presence_with<F>(&mut self, mut open: F)
+    where
+        F: FnMut(bool) -> Box<dyn Device>,
+    {
+        let observed_device = open(false);
+        let observed = observed_device.descriptor();
+        let Some((expected_name, should_claim)) = self.plan_device_presence_refresh(&observed)
+        else {
+            return;
+        };
+        let claimed_device = should_claim.then(|| open(true));
+        self.apply_device_presence_refresh(&expected_name, observed_device, claimed_device);
+    }
+
+    /// Decide whether a separately probed descriptor represents a hot-plug or
+    /// transport change. The caller may perform the potentially blocking HID
+    /// probe and claim without holding the daemon state mutex.
+    pub fn plan_device_presence_refresh(
+        &self,
+        observed: &mb_device::DeviceDescriptor,
+    ) -> Option<(String, bool)> {
+        let current = self.device.descriptor();
+        (current.name != observed.name).then(|| {
+            (
+                current.name,
+                observed.name != "mock" && self.config.hardware_control_enabled,
+            )
+        })
+    }
+
+    /// Apply devices opened outside the daemon state mutex. If state or the
+    /// physical transport changed while I/O was in flight, defer to the next
+    /// bounded refresh instead of overwriting newer state.
+    pub fn apply_device_presence_refresh(
+        &mut self,
+        expected_current_name: &str,
+        observed_device: Box<dyn Device>,
+        claimed_device: Option<Box<dyn Device>>,
+    ) {
+        if self.device.descriptor().name != expected_current_name {
+            return;
+        }
+        let observed = observed_device.descriptor();
+        if observed.name == expected_current_name {
+            return;
+        }
+
+        let replacement = if observed.name != "mock" && self.config.hardware_control_enabled {
+            let Some(claimed) = claimed_device else {
+                return;
+            };
+            if claimed.descriptor().name != observed.name {
+                return;
+            }
+            claimed
+        } else {
+            observed_device
+        };
+        let before_render = replacement.descriptor();
+        self.device = replacement;
+        self.last_leds = unrendered_led_frame();
+        self.broadcast_ui(BusEvent::DeviceChanged {
+            connected: before_render.connected,
+            name: before_render.name,
+        });
+        let keys = self.registry.agent_key_ids(&self.config);
+        self.render_leds(&keys);
     }
 
     fn move_focus(&mut self, offset: isize) {
@@ -1005,7 +1101,27 @@ mod tests {
     use mb_adapters::{ObservedSession, SessionContext};
 
     const CNVS_OWNER_FOR_TEST: u64 = u64::MAX - 3;
-    use mb_device::MockDevice;
+    use mb_device::{DeviceDescriptor, MockDevice};
+
+    struct DescriptorDevice(DeviceDescriptor);
+
+    impl Device for DescriptorDevice {
+        fn descriptor(&self) -> DeviceDescriptor {
+            self.0.clone()
+        }
+
+        fn set_leds(&mut self, _frame: &LedFrame) {}
+    }
+
+    fn physical(name: &str, connected: bool) -> Box<dyn Device> {
+        Box::new(DescriptorDevice(DeviceDescriptor {
+            name: name.into(),
+            agent_key_count: AGENT_KEY_COUNT,
+            has_dial: true,
+            has_joystick: true,
+            connected,
+        }))
+    }
 
     fn session(id: &str, state: AgentState) -> SessionStatus {
         SessionStatus {
@@ -1032,6 +1148,55 @@ mod tests {
         assert!(should_reopen_device(&enabled, &enabled, false));
         assert!(!should_reopen_device(&enabled, &enabled, true));
         assert!(should_reopen_device(&enabled, &disabled, true));
+    }
+
+    #[test]
+    fn hotplug_discovers_and_claims_a_new_transport_when_requested() {
+        let mut state = state();
+        state.config.hardware_control_enabled = true;
+        let mut calls = Vec::new();
+
+        state.refresh_device_presence_with(|should_claim| {
+            calls.push(should_claim);
+            physical("codex-micro-bluetooth", should_claim)
+        });
+
+        assert_eq!(calls, vec![false, true]);
+        assert_eq!(state.device.descriptor().name, "codex-micro-bluetooth");
+        assert!(state.device.descriptor().connected);
+    }
+
+    #[test]
+    fn stable_failed_claim_does_not_retry_until_requested() {
+        let config = DaemonConfig {
+            hardware_control_enabled: true,
+            ..DaemonConfig::default()
+        };
+        let mut state = DaemonState::new(physical("codex-micro-usb", false), config);
+        let mut calls = Vec::new();
+
+        state.refresh_device_presence_with(|should_claim| {
+            calls.push(should_claim);
+            physical("codex-micro-usb", false)
+        });
+
+        assert_eq!(calls, vec![false]);
+        assert!(!state.device.descriptor().connected);
+    }
+
+    #[test]
+    fn stale_presence_result_does_not_replace_newer_device_state() {
+        let mut state =
+            DaemonState::new(physical("codex-micro-usb", false), DaemonConfig::default());
+        let observed = physical("codex-micro-bluetooth", false);
+        let (expected_name, _) = state
+            .plan_device_presence_refresh(&observed.descriptor())
+            .expect("transport changed");
+
+        state.device = physical("codex-micro-hid", false);
+        state.apply_device_presence_refresh(&expected_name, observed, None);
+
+        assert_eq!(state.device.descriptor().name, "codex-micro-hid");
     }
 
     #[test]

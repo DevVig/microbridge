@@ -71,7 +71,7 @@ export function Disconnected({
             style={{ color: t.textSecondary }}
           >
             The menu bar app reads your sessions from the local daemon. It isn't
-            answering yet. Quit and reopen Microbridge to restart its bundled
+            answering yet. {view === "settings" ? "Close this window, then quit and reopen Microbridge" : "Quit and reopen Microbridge"} to restart its bundled
             daemon; this window fills in as soon as the local socket is ready.
           </p>
         </div>

@@ -242,6 +242,22 @@ describe("Popover", () => {
     expect(availableHtml).toContain("Codex Micro ready");
     expect(availableHtml).toContain(">Claim<");
 
+    detected.device_name = "codex-micro-bluetooth";
+    const bluetoothHtml = renderToStaticMarkup(
+      <Popover
+        snapshot={detected}
+        dark
+        onOpenSettings={noop}
+        onTogglePause={noop}
+        onHardwareControl={noop}
+        onQuit={noop}
+      />,
+    );
+    expect(bluetoothHtml).toContain("Bluetooth detected");
+    expect(bluetoothHtml).toContain(">Claim<");
+
+    detected.device_name = "codex-micro-usb";
+
     detected.config.hardware_control_enabled = true;
     const retryHtml = renderToStaticMarkup(
       <Popover

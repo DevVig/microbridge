@@ -8,6 +8,7 @@ import {
   subscribeSnapshot,
 } from "./lib/bus";
 import { promptLaunchAtLoginOnce } from "./lib/autostart";
+import { requestInputMonitoringAccess } from "./lib/hardwareControl";
 import { resolveAppearance } from "./lib/theme";
 import type { DaemonConfig, Snapshot } from "./lib/types";
 import { runAutomaticUpdateCheck, runUpdateCheck } from "./lib/updater";
@@ -116,6 +117,14 @@ export default function App() {
     }
   };
 
+  const applyHardwareControl = async (enabled: boolean) => {
+    if (enabled) await requestInputMonitoringAccess();
+    await applyConfig({
+      ...snapshot.config,
+      hardware_control_enabled: enabled,
+    });
+  };
+
   if (view === "hud") {
     return <Hud snapshot={snapshot} dark={dark} />;
   }
@@ -127,7 +136,19 @@ export default function App() {
         dark={dark}
         tab={tab}
         onTab={setTab}
-        onConfig={(c) => void applyConfig(c)}
+        onConfig={(c) => {
+          if (
+            c.hardware_control_enabled &&
+            !snapshot.config.hardware_control_enabled
+          ) {
+            void (async () => {
+              await requestInputMonitoringAccess();
+              await applyConfig(c);
+            })();
+          } else {
+            void applyConfig(c);
+          }
+        }}
         onClose={() => void closeSettings()}
         onAgentKey={(index, open) => void activateAgentKey(index, open)}
       />
@@ -145,12 +166,7 @@ export default function App() {
           pause_leds: !snapshot.config.pause_leds,
         })
       }
-      onHardwareControl={(enabled) =>
-        void applyConfig({
-          ...snapshot.config,
-          hardware_control_enabled: enabled,
-        })
-      }
+      onHardwareControl={(enabled) => void applyHardwareControl(enabled)}
       onQuit={() => void quitUi()}
       onAgentKey={(index, open) => void activateAgentKey(index, open)}
     />

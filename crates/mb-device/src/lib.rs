@@ -22,7 +22,7 @@ pub use capture::run_capture;
 pub use framing::{frame_rpc, parse_report, CHANNEL_DEBUG, CHANNEL_RPC, REPORT_ID};
 pub use ids::{is_supported_pid, CODEX_MICRO_PID, WL_MANUFACTURERS, WL_USAGE_PAGE, WL_VID};
 pub use lighting::{parse_rgb_hex, threads_lighting_rpc};
-pub use probe::{match_usb_text, probe_usb_micro, ProbeResult};
+pub use probe::{match_usb_text, probe_usb_micro, DeviceTransport, ProbeResult};
 pub use rpc::{
     parse_notify, threads_lighting_request, DeviceNotify, LightingEffect, METHOD_RGB_CONFIG,
     METHOD_THREADS_LIGHTING,
@@ -154,7 +154,7 @@ impl Device for MockDevice {
     }
 }
 
-/// Best-effort USB HID driver for the Codex Micro.
+/// Best-effort USB/Bluetooth HID driver for the Codex Micro.
 ///
 /// Without a probed device this behaves like [`MockDevice`] and reports
 /// `connected: false`. Presence (Detected) uses VID/PID from ChatGPT's kit.
@@ -163,8 +163,8 @@ pub struct HidDevice {
     inner: MockDevice,
     /// True only when the vendor HID interface is claimed for writes.
     connected: bool,
-    /// USB present (Detected) even if not claimed.
-    usb_present: bool,
+    /// Physical HID present (Detected) even if not claimed.
+    device_present: bool,
     name: String,
     product_id: Option<u16>,
     rpc_seq: u32,
@@ -176,7 +176,7 @@ impl std::fmt::Debug for HidDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HidDevice")
             .field("connected", &self.connected)
-            .field("usb_present", &self.usb_present)
+            .field("device_present", &self.device_present)
             .field("name", &self.name)
             .field("product_id", &self.product_id)
             .finish_non_exhaustive()
@@ -188,7 +188,7 @@ impl Default for HidDevice {
         Self {
             inner: MockDevice::default(),
             connected: false,
-            usb_present: false,
+            device_present: false,
             name: "codex-micro".into(),
             product_id: None,
             rpc_seq: 1,
@@ -199,7 +199,7 @@ impl Default for HidDevice {
 }
 
 impl HidDevice {
-    /// Attempt to open the first matching USB device. Falls back to
+    /// Attempt to open the first matching HID device. Falls back to
     /// disconnected (mock rendering) when none is found or HID is unavailable.
     ///
     /// Claim is opt-in (`open_with_claim(true)` + `hid` feature) so we do not
@@ -216,11 +216,11 @@ impl HidDevice {
         }
 
         let pid = probe.product_id.unwrap_or(CODEX_MICRO_PID);
-        let name = format!("{}-usb", ids::product_name(pid));
+        let name = format!("{}-{}", ids::product_name(pid), probe.transport.suffix());
         let mut device = Self {
             inner: MockDevice::default(),
             connected: false,
-            usb_present: true,
+            device_present: true,
             name,
             product_id: Some(pid),
             rpc_seq: 1,
@@ -236,11 +236,11 @@ impl HidDevice {
 
     pub fn set_connected_for_tests(&mut self, connected: bool) {
         self.connected = connected;
-        self.usb_present = connected || self.usb_present;
+        self.device_present = connected || self.device_present;
     }
 
-    pub fn usb_present(&self) -> bool {
-        self.usb_present
+    pub fn device_present(&self) -> bool {
+        self.device_present
     }
 
     #[cfg(feature = "hid")]
@@ -252,9 +252,12 @@ impl HidDevice {
                     name = %claimed.name,
                     "claimed Work Louder HID interface"
                 );
-                self.name = claimed.name.clone();
+                self.name = format!("{}-{}", claimed.name, claimed.transport.suffix());
                 self.product_id = Some(claimed.product_id);
-                self.connected = true;
+                // Opening is not proof of control on macOS: TCC can allow the
+                // handle and still reject IOHIDDeviceSetReport. A successful
+                // write below is the ownership boundary exposed to the UI.
+                self.connected = false;
                 self.claimed = Some(claimed);
             }
             Err(error) => {
@@ -302,32 +305,33 @@ impl Device for HidDevice {
         let request = threads_lighting_rpc(frame, rpc_id);
         let reports = frame_rpc(&request);
 
-        if self.connected {
-            #[cfg(feature = "hid")]
-            if let Some(claimed) = self.claimed.as_ref() {
-                if let Err(error) = claimed.write_rpc(&request) {
-                    tracing::warn!(%error, "failed to write thread lighting RPC");
-                } else {
-                    tracing::debug!(
-                        device = %self.name,
-                        bytes = request.len(),
-                        packets = reports.len(),
-                        "hid rpc v.oai.thstatus"
-                    );
-                }
+        #[cfg(feature = "hid")]
+        if let Some(claimed) = self.claimed.as_ref() {
+            if let Err(error) = claimed.write_rpc(&request) {
+                self.connected = false;
+                tracing::warn!(%error, "failed to write thread lighting RPC");
+            } else {
+                self.connected = true;
+                tracing::debug!(
+                    device = %self.name,
+                    bytes = request.len(),
+                    packets = reports.len(),
+                    "hid rpc v.oai.thstatus"
+                );
             }
-            #[cfg(not(feature = "hid"))]
-            {
-                let _ = reports;
-                tracing::debug!(device = %self.name, %request, "hid led rpc (no claim backend)");
-            }
-        } else if self.usb_present {
+        } else if self.device_present {
             tracing::debug!(
                 device = %self.name,
                 packets = reports.len(),
                 request = %request,
-                "usb present; packed LED RPC ready (enable Device hardware control to write)"
+                "device present; packed LED RPC ready (enable Device hardware control to write)"
             );
+        }
+
+        #[cfg(not(feature = "hid"))]
+        if self.connected {
+            let _ = reports;
+            tracing::debug!(device = %self.name, %request, "hid led rpc (no claim backend)");
         }
 
         self.inner.set_leds(frame);
@@ -414,7 +418,7 @@ fn joystick_from_angle(angle: i64) -> Option<DeviceInput> {
     Some(DeviceInput::JoystickFlick { direction })
 }
 
-/// Prefer a claimed HID device; else a detected-but-unclaimed USB Micro;
+/// Prefer a claimed HID device; else a detected-but-unclaimed physical Micro;
 /// else the mock simulator.
 pub fn open_default_device() -> Box<dyn Device> {
     open_default_device_with_claim(claim_requested())
@@ -424,7 +428,7 @@ pub fn open_default_device() -> Box<dyn Device> {
 /// override is handled by the daemon before calling this function.
 pub fn open_default_device_with_claim(should_claim: bool) -> Box<dyn Device> {
     let hid = HidDevice::open_with_claim(should_claim);
-    if hid.usb_present() || hid.descriptor().connected {
+    if hid.device_present() || hid.descriptor().connected {
         Box::new(hid)
     } else {
         Box::new(MockDevice::default())

@@ -14,16 +14,26 @@ Do the steps in order. Each one has an exact command and a "pass" condition.
   fighting for the interface during capture.
 - If `microbridged` is running with a live claim, stop it for the capture step:
   it only needs to be running for the LED step (§4).
-- Plug the Micro in over **USB-C** (BLE is out of scope for M2).
+- Connect the Micro over **USB-C** or pair and connect it over **Bluetooth**.
 
 ## 1. Confirm detection
 
 ```sh
-system_profiler SPUSBDataType -detailLevel mini | grep -iA3 "work louder\|codex\|0x303a"
+ioreg -r -c IOHIDDevice -l -w 0 | awk '
+  /^\+-o / {
+    if (tolower(record) ~ /codex micro|creator micro/) printf "%s", record
+    record = ""
+  }
+  { record = record $0 ORS }
+  END {
+    if (tolower(record) ~ /codex micro|creator micro/) printf "%s", record
+  }
+'
 ```
 
-**Pass:** a record with `Vendor ID: 0x303a` and `Product ID: 0x8360`
-(Codex Micro) or `0x8297` / `0x8298` (Creator Micro V2).
+**Pass:** a record with `VendorID = 12346` (`0x303a`), `ProductID = 33632`
+(`0x8360`, Codex Micro), `33431` (`0x8297`, Creator Micro V2), or `33432`
+(`0x8298`, Creator Micro V2), and `Transport = USB` or `Bluetooth`.
 
 Then confirm the daemon sees it:
 
@@ -33,13 +43,14 @@ cargo run -p microbridgectl status   # in another — device should show "Detect
 ```
 
 **Pass:** the snapshot reports the Micro as **Detected** (not `mock`).
-Record the real `iProduct` string and confirmed PID:
+Record the real product string, confirmed PID, and transport:
 
 | Field | Documented | Observed |
 |---|---|---|
-| Product ID | `0x8360` | |
+| Product ID | `0x8360`, `0x8297`, or `0x8298` | |
 | iProduct string | _(unknown)_ | |
 | Manufacturer | `Work Louder` | |
+| Transport | `USB` / `Bluetooth` | |
 
 ## 2. Capture the real input map (the important one)
 

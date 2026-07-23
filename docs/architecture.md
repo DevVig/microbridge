@@ -28,7 +28,7 @@ line; regressions are release blockers.
 
 | Metric | Budget | How |
 |---|---|---|
-| Idle CPU | near-idle with bounded wakeups | local session and frontmost-app watchers are event-driven; enabled hardware input is drained on a 16 ms tick, CNVS refreshes its local snapshot every 2 seconds while agents are active and every 10 seconds while idle, and an enabled paired T3 adapter refreshes at 900 ms with exponential backoff. |
+| Idle CPU | near-idle with bounded wakeups | local session and frontmost-app watchers are event-driven; enabled hardware input is drained on a 16 ms tick, physical HID presence refreshes every 2 seconds without reopening a stable device, CNVS refreshes its local snapshot every 2 seconds while agents are active and every 10 seconds while idle, and an enabled paired T3 adapter refreshes at 900 ms with exponential backoff. |
 | Idle RSS (daemon) | < 15 MB, target single-digit | single static Rust binary, no runtime |
 | Network | explicit only | no telemetry; CNVS uses only its token-authenticated loopback endpoint, update checks are opt-in, T3 traffic requires an enabled paired environment, and Factory invokes the signed-in Droid CLI only for a requested control |
 | Device traffic | bytes per state *transition* | LED frames written only when resolved state changes; a 32–64 byte HID report each |

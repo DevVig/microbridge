@@ -115,7 +115,8 @@ The daily driver. **Read-mostly** — no agent actions, no theme toggle.
 - **Mini device echo**: a passive miniature of the real deck (dial, joystick, six lit Agent Keys, command row) — read-only, labeled as such
 - Threads list: state dot + app + title + elapsed — no approve/reject, no click-to-focus
 - Contextual hardware card: Claim when detected, Release when connected, Retry
-  when another process owns the HID interface.
+  for recoverable claim failures such as missing Input Monitoring permission or
+  another process owning the HID interface.
 - Footer: Settings · Pause LEDs · Quit
 
 When disconnected, the popover shows a connection-first empty state ("Connect

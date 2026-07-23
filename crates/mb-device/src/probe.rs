@@ -1,13 +1,76 @@
-//! Best-effort USB presence probe — does not claim the HID interface.
+//! Best-effort HID presence probe — does not claim the HID interface.
 
 use crate::ids::{is_supported_pid, CODEX_MICRO_PID, WL_VID};
 
-/// Result of a non-claiming USB probe.
+/// Result of a non-claiming HID-registry probe, with a USB fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeResult {
     pub present: bool,
-    /// Best-effort product id when parsed from the host USB listing.
+    /// Best-effort product id reported by the HID registry or host USB listing.
     pub product_id: Option<u16>,
+    pub transport: DeviceTransport,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeviceTransport {
+    Usb,
+    Bluetooth,
+    #[default]
+    Unknown,
+}
+
+impl DeviceTransport {
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::Usb => "usb",
+            Self::Bluetooth => "bluetooth",
+            Self::Unknown => "hid",
+        }
+    }
+
+    fn preference_rank(self) -> u8 {
+        match self {
+            // A cable is the least ambiguous route when firmware exposes both
+            // transports at once. Bluetooth remains preferred over an unknown
+            // backend, and is selected whenever USB is absent.
+            Self::Usb => 0,
+            Self::Bluetooth => 1,
+            Self::Unknown => 2,
+        }
+    }
+}
+
+#[cfg(feature = "hid")]
+pub(crate) fn transport_from_bus_type(bus_type: hidapi::BusType) -> DeviceTransport {
+    match bus_type {
+        hidapi::BusType::Usb => DeviceTransport::Usb,
+        hidapi::BusType::Bluetooth => DeviceTransport::Bluetooth,
+        _ => DeviceTransport::Unknown,
+    }
+}
+
+#[cfg(feature = "hid")]
+pub(crate) fn hid_candidate_sort_key(
+    info: &hidapi::DeviceInfo,
+    preferred_pid: Option<u16>,
+) -> (bool, u8, u16) {
+    candidate_preference_key(
+        info.product_id(),
+        transport_from_bus_type(info.bus_type()),
+        preferred_pid,
+    )
+}
+
+fn candidate_preference_key(
+    product_id: u16,
+    transport: DeviceTransport,
+    preferred_pid: Option<u16>,
+) -> (bool, u8, u16) {
+    (
+        preferred_pid.is_some_and(|pid| product_id != pid),
+        transport.preference_rank(),
+        product_id,
+    )
 }
 
 impl ProbeResult {
@@ -15,16 +78,34 @@ impl ProbeResult {
         Self {
             present: false,
             product_id: None,
+            transport: DeviceTransport::Unknown,
         }
     }
 }
 
-/// Probe for a supported Work Louder / Codex Micro USB device.
+/// Probe for a supported Work Louder / Codex Micro HID device.
+///
+/// The HID registry is authoritative because macOS exposes both USB and BLE
+/// HID devices there. `system_profiler` remains a USB-only fallback for builds
+/// compiled without the optional HID backend or if HID initialization fails.
 pub fn probe_usb_micro() -> ProbeResult {
+    #[cfg(feature = "hid")]
+    match probe_hid_micro() {
+        Ok(Some(result)) => return result,
+        Ok(None) => return ProbeResult::absent(),
+        Err(()) => {}
+    }
+
     #[cfg(target_os = "macos")]
     {
         match system_profiler_usb_text(std::time::Duration::from_secs(3)) {
-            Some(text) => match_usb_text(&text),
+            Some(text) => {
+                let mut result = match_usb_text(&text);
+                if result.present {
+                    result.transport = DeviceTransport::Usb;
+                }
+                result
+            }
             None => ProbeResult::absent(),
         }
     }
@@ -32,6 +113,30 @@ pub fn probe_usb_micro() -> ProbeResult {
     {
         ProbeResult::absent()
     }
+}
+
+#[cfg(feature = "hid")]
+fn probe_hid_micro() -> Result<Option<ProbeResult>, ()> {
+    use hidapi::HidApi;
+
+    let api = HidApi::new().map_err(|_| ())?;
+    let mut candidates: Vec<_> = api
+        .device_list()
+        .filter(|info| {
+            info.vendor_id() == WL_VID
+                && is_supported_pid(info.product_id())
+                && info.usage_page() == crate::WL_USAGE_PAGE
+        })
+        .collect();
+    candidates.sort_by_key(|info| hid_candidate_sort_key(info, None));
+    let Some(info) = candidates.first() else {
+        return Ok(None);
+    };
+    Ok(Some(ProbeResult {
+        present: true,
+        product_id: Some(info.product_id()),
+        transport: transport_from_bus_type(info.bus_type()),
+    }))
 }
 
 /// Match `system_profiler SPUSBDataType` (or similar) text against known IDs.
@@ -44,6 +149,7 @@ pub fn match_usb_text(raw: &str) -> ProbeResult {
             return ProbeResult {
                 present: true,
                 product_id: Some(pid),
+                transport: DeviceTransport::Usb,
             };
         }
     }
@@ -57,6 +163,7 @@ pub fn match_usb_text(raw: &str) -> ProbeResult {
         return ProbeResult {
             present: true,
             product_id: Some(CODEX_MICRO_PID),
+            transport: DeviceTransport::Usb,
         };
     }
 
@@ -132,6 +239,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn transport_preference_is_usb_then_bluetooth_then_unknown() {
+        assert!(
+            DeviceTransport::Usb.preference_rank() < DeviceTransport::Bluetooth.preference_rank()
+        );
+        assert!(
+            DeviceTransport::Bluetooth.preference_rank()
+                < DeviceTransport::Unknown.preference_rank()
+        );
+    }
+
+    #[test]
+    fn preferred_pid_precedes_transport_tie_break() {
+        let preferred_bluetooth = candidate_preference_key(
+            CODEX_MICRO_PID,
+            DeviceTransport::Bluetooth,
+            Some(CODEX_MICRO_PID),
+        );
+        let other_usb = candidate_preference_key(
+            crate::ids::CREATOR_MICRO_V2_PIDS[0],
+            DeviceTransport::Usb,
+            Some(CODEX_MICRO_PID),
+        );
+        assert!(preferred_bluetooth < other_usb);
+
+        let preferred_usb =
+            candidate_preference_key(CODEX_MICRO_PID, DeviceTransport::Usb, Some(CODEX_MICRO_PID));
+        assert!(preferred_usb < preferred_bluetooth);
+    }
+
+    #[test]
     fn matches_vid_pid_block() {
         let sample = r#"
 Codex Micro:
@@ -143,6 +280,7 @@ Codex Micro:
         let r = match_usb_text(sample);
         assert!(r.present);
         assert_eq!(r.product_id, Some(CODEX_MICRO_PID));
+        assert_eq!(r.transport, DeviceTransport::Usb);
     }
 
     #[test]

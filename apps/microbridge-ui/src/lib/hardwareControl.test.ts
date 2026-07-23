@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hardwareControlState } from "./hardwareControl";
+import {
+  deviceTransportLabel,
+  hardwareControlState,
+  isPhysicalMicro,
+} from "./hardwareControl";
 import type { Snapshot } from "./types";
 
 function snapshot(
@@ -53,6 +57,17 @@ describe("hardwareControlState", () => {
     expect(hardwareControlState(snapshot("codex-micro-usb", true, false))).toBe(
       "connected",
     );
+    expect(hardwareControlState(snapshot("codex-micro-bluetooth"))).toBe(
+      "available",
+    );
+  });
+
+  it("recognizes supported HID transports", () => {
+    expect(isPhysicalMicro("codex-micro-usb")).toBe(true);
+    expect(isPhysicalMicro("codex-micro-bluetooth")).toBe(true);
+    expect(deviceTransportLabel("codex-micro-bluetooth")).toBe("Bluetooth");
+    expect(deviceTransportLabel("unrelated-usb")).toBeNull();
+    expect(isPhysicalMicro("daemon-offline")).toBe(false);
   });
 
   it("does not offer hardware actions for non-device surfaces", () => {

@@ -38,6 +38,7 @@ import {
 } from "../lib/hosts";
 import { integrationIcon } from "../lib/integrationIcons";
 import { openHostApp, openableHostApp } from "../lib/openHostApp";
+import { deviceTransportLabel, isPhysicalMicro } from "../lib/hardwareControl";
 import { integrationGuidance } from "../lib/integrationSetup";
 import { MeshBackground } from "../components/MeshBackground";
 import { agentKeyLedFrame } from "../lib/types";
@@ -632,8 +633,8 @@ export function Settings({
                 <span className="mt-0.5 block text-[11px]" style={{ color: t.textMuted }}>
                   {snapshot.device_connected
                     ? "Connected — keys, dial, joystick, and lighting are active."
-                    : cfg.hardware_control_enabled && snapshot.device_name.includes("usb")
-                      ? "Control was requested, but another app may own the HID interface. Retry from the popover or right-click menu, or toggle off and on here."
+                    : cfg.hardware_control_enabled && isPhysicalMicro(snapshot.device_name)
+                      ? "Control was requested, but Input Monitoring may need approval or another app may own the HID interface. Retry from the popover or right-click menu, or toggle off and on here."
                       : "Off by default to avoid competing with another device owner. Changes apply immediately."}
                 </span>
               </span>
@@ -671,12 +672,12 @@ export function Settings({
               Device: {snapshot.device_name}
               {snapshot.device_connected
                 ? " · connected"
-                : snapshot.device_name.includes("usb")
-                  ? " · USB detected; hardware control disabled or interface busy"
+                : isPhysicalMicro(snapshot.device_name)
+                  ? ` · ${deviceTransportLabel(snapshot.device_name) ?? "HID"} detected; hardware control disabled or interface busy`
                   : snapshot.device_name === "mock"
                     ? " · simulator"
                     : " · not connected"}
-              {" · "}local USB control
+              {" · "}local USB/Bluetooth control
             </p>
           </section>
         )}
