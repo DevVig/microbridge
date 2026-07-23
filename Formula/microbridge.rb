@@ -15,7 +15,7 @@
 class Microbridge < Formula
   desc "Open-source control plane for the Codex Micro (menu bar + daemon)"
   homepage "https://github.com/DevVig/microbridge"
-  version "0.3.9"
+  version "0.3.10"
   license "MIT"
   head "https://github.com/DevVig/microbridge.git", branch: "main"
 
@@ -23,22 +23,22 @@ class Microbridge < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/DevVig/microbridge/releases/download/v0.3.9/microbridge-v0.3.9-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/DevVig/microbridge/releases/download/v0.3.10/microbridge-v0.3.10-aarch64-apple-darwin.tar.gz"
       # sha256 filled by scripts/bump-formula.sh after each release
-      sha256 "7d4671e8448c421b64afc297ef7b7bf11d86e8f82b66a66a85504f0d4ec8bfb2"
+      sha256 "87da37fe4625f3f47ad41fb475634d0bceb8184e7477bbc99b3da41714e644bc"
 
       resource "ui" do
-        url "https://github.com/DevVig/microbridge/releases/download/v0.3.9/microbridge-ui-v0.3.9-aarch64-apple-darwin.tar.gz"
-        sha256 "7d4c52e27eada6995bb9f8cd2833fff6e31c0e6886db4d7f608ab2c8544399e0"
+        url "https://github.com/DevVig/microbridge/releases/download/v0.3.10/microbridge-ui-v0.3.10-aarch64-apple-darwin.tar.gz"
+        sha256 "031a0a651c5e3528bdce045e67fd510166eb2d4ab7b15145fd73935c3ae9e958"
       end
     end
     on_intel do
-      url "https://github.com/DevVig/microbridge/releases/download/v0.3.9/microbridge-v0.3.9-x86_64-apple-darwin.tar.gz"
-      sha256 "131a7e4d76949fc65180345834fb915f7c5a461ad0b1aa062f8c2afacc27d833"
+      url "https://github.com/DevVig/microbridge/releases/download/v0.3.10/microbridge-v0.3.10-x86_64-apple-darwin.tar.gz"
+      sha256 "21732f0a9057d3456f01f4879c7b925e4263d8229df14e33569e6f84f79e6c3c"
 
       resource "ui" do
-        url "https://github.com/DevVig/microbridge/releases/download/v0.3.9/microbridge-ui-v0.3.9-x86_64-apple-darwin.tar.gz"
-        sha256 "5b95f275b13bee41f7b73b3b4481753f0703b25c643709abed6a54dae4af842d"
+        url "https://github.com/DevVig/microbridge/releases/download/v0.3.10/microbridge-ui-v0.3.10-x86_64-apple-darwin.tar.gz"
+        sha256 "cce205ea6749a2554b8d062b1a7aabb2d84851ca41e44ba6b1f423288ad2fe64"
       end
     end
   end
