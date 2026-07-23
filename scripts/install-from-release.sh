@@ -95,6 +95,17 @@ if [[ "$OS" == "Darwin" ]]; then
         /usr/bin/pgrep -f "$APP_COMMAND_PATTERN" >/dev/null 2>&1 || break
         /bin/sleep 0.1
       done
+      if /usr/bin/pgrep -f "$APP_COMMAND_PATTERN" >/dev/null 2>&1; then
+        echo "    app did not exit after SIGTERM; forcing shutdown"
+        while read -r pid; do
+          kill -KILL "$pid" 2>/dev/null || true
+        done < <(/usr/bin/pgrep -f "$APP_COMMAND_PATTERN" 2>/dev/null || true)
+        /bin/sleep 0.1
+      fi
+      if /usr/bin/pgrep -f "$APP_COMMAND_PATTERN" >/dev/null 2>&1; then
+        echo "error: could not stop $DEST before replacement" >&2
+        return 1
+      fi
     fi
     rm -rf "$DEST"
     mv "$STAGING" "$DEST"

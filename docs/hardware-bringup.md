@@ -19,7 +19,16 @@ Do the steps in order. Each one has an exact command and a "pass" condition.
 ## 1. Confirm detection
 
 ```sh
-ioreg -r -c IOHIDDevice -l | grep -i -E -A8 "codex micro|creator micro"
+ioreg -r -c IOHIDDevice -l -w 0 | awk '
+  /^\+-o / {
+    if (tolower(record) ~ /codex micro|creator micro/) printf "%s", record
+    record = ""
+  }
+  { record = record $0 ORS }
+  END {
+    if (tolower(record) ~ /codex micro|creator micro/) printf "%s", record
+  }
+'
 ```
 
 **Pass:** a record with `VendorID = 12346` (`0x303a`), `ProductID = 33632`

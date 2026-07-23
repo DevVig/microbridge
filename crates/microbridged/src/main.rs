@@ -91,11 +91,27 @@ async fn main() -> std::io::Result<()> {
         let mut next_device_probe = tokio::time::Instant::now();
         loop {
             interval.tick().await;
-            let mut state = input_bus.lock().await;
-            state.poll_device_inputs();
-            state.expire_leased_sessions();
-            if tokio::time::Instant::now() >= next_device_probe {
-                state.refresh_device_presence();
+            let probe_due = tokio::time::Instant::now() >= next_device_probe;
+            {
+                let mut state = input_bus.lock().await;
+                state.poll_device_inputs();
+                state.expire_leased_sessions();
+            }
+            if probe_due {
+                // HID enumeration/opening can block in the OS. Keep it outside
+                // the shared state mutex so UI and adapter sockets remain live.
+                let observed = mb_device::open_default_device_with_claim(false);
+                let observed_descriptor = observed.descriptor();
+                let plan = {
+                    let state = input_bus.lock().await;
+                    state.plan_device_presence_refresh(&observed_descriptor)
+                };
+                if let Some((expected_name, should_claim)) = plan {
+                    let claimed =
+                        should_claim.then(|| mb_device::open_default_device_with_claim(true));
+                    let mut state = input_bus.lock().await;
+                    state.apply_device_presence_refresh(&expected_name, observed, claimed);
+                }
                 next_device_probe = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
             }
         }

@@ -11,6 +11,7 @@ use hidapi::{HidApi, HidDevice as RawHid};
 
 use crate::framing::{frame_rpc, parse_report, CHANNEL_RPC, REPORT_ID};
 use crate::ids::{is_supported_pid, product_name, WL_USAGE_PAGE, WL_VID};
+use crate::probe::{hid_candidate_sort_key, transport_from_bus_type};
 use crate::rpc::{parse_notify, DeviceNotify};
 use crate::DeviceTransport;
 
@@ -35,9 +36,7 @@ pub fn open_device(preferred_pid: Option<u16>) -> Result<ClaimedDevice, String> 
         })
         .collect();
 
-    if let Some(pid) = preferred_pid {
-        candidates.sort_by_key(|info| usize::from(info.product_id() != pid));
-    }
+    candidates.sort_by_key(|info| hid_candidate_sort_key(info, preferred_pid));
 
     let info = candidates
         .first()
@@ -45,11 +44,7 @@ pub fn open_device(preferred_pid: Option<u16>) -> Result<ClaimedDevice, String> 
 
     let product_id = info.product_id();
     let name = product_name(product_id).to_string();
-    let transport = match info.bus_type() {
-        hidapi::BusType::Usb => DeviceTransport::Usb,
-        hidapi::BusType::Bluetooth => DeviceTransport::Bluetooth,
-        _ => DeviceTransport::Unknown,
-    };
+    let transport = transport_from_bus_type(info.bus_type());
     let device = api
         .open_path(info.path())
         .map_err(|e| format!("open_path failed: {e}"))?;

@@ -826,24 +826,64 @@ impl DaemonState {
     /// The 2-second caller cadence is only for hot-plug discovery; stable
     /// detected/connected devices keep their existing handle.
     pub fn refresh_device_presence(&mut self) {
-        self.refresh_device_presence_with(|should_claim| {
-            mb_device::open_default_device_with_claim(should_claim)
-        });
+        self.refresh_device_presence_with(mb_device::open_default_device_with_claim);
     }
 
     fn refresh_device_presence_with<F>(&mut self, mut open: F)
     where
         F: FnMut(bool) -> Box<dyn Device>,
     {
-        let current = self.device.descriptor();
         let observed_device = open(false);
         let observed = observed_device.descriptor();
-        if current.name == observed.name {
+        let Some((expected_name, should_claim)) = self.plan_device_presence_refresh(&observed)
+        else {
+            return;
+        };
+        let claimed_device = should_claim.then(|| open(true));
+        self.apply_device_presence_refresh(&expected_name, observed_device, claimed_device);
+    }
+
+    /// Decide whether a separately probed descriptor represents a hot-plug or
+    /// transport change. The caller may perform the potentially blocking HID
+    /// probe and claim without holding the daemon state mutex.
+    pub fn plan_device_presence_refresh(
+        &self,
+        observed: &mb_device::DeviceDescriptor,
+    ) -> Option<(String, bool)> {
+        let current = self.device.descriptor();
+        (current.name != observed.name).then(|| {
+            (
+                current.name,
+                observed.name != "mock" && self.config.hardware_control_enabled,
+            )
+        })
+    }
+
+    /// Apply devices opened outside the daemon state mutex. If state or the
+    /// physical transport changed while I/O was in flight, defer to the next
+    /// bounded refresh instead of overwriting newer state.
+    pub fn apply_device_presence_refresh(
+        &mut self,
+        expected_current_name: &str,
+        observed_device: Box<dyn Device>,
+        claimed_device: Option<Box<dyn Device>>,
+    ) {
+        if self.device.descriptor().name != expected_current_name {
+            return;
+        }
+        let observed = observed_device.descriptor();
+        if observed.name == expected_current_name {
             return;
         }
 
         let replacement = if observed.name != "mock" && self.config.hardware_control_enabled {
-            open(true)
+            let Some(claimed) = claimed_device else {
+                return;
+            };
+            if claimed.descriptor().name != observed.name {
+                return;
+            }
+            claimed
         } else {
             observed_device
         };
@@ -1142,6 +1182,21 @@ mod tests {
 
         assert_eq!(calls, vec![false]);
         assert!(!state.device.descriptor().connected);
+    }
+
+    #[test]
+    fn stale_presence_result_does_not_replace_newer_device_state() {
+        let mut state =
+            DaemonState::new(physical("codex-micro-usb", false), DaemonConfig::default());
+        let observed = physical("codex-micro-bluetooth", false);
+        let (expected_name, _) = state
+            .plan_device_presence_refresh(&observed.descriptor())
+            .expect("transport changed");
+
+        state.device = physical("codex-micro-hid", false);
+        state.apply_device_presence_refresh(&expected_name, observed, None);
+
+        assert_eq!(state.device.descriptor().name, "codex-micro-hid");
     }
 
     #[test]

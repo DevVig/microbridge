@@ -15,9 +15,10 @@ Firmware changes may invalidate this document — treat it as a living map.
 | Key / dial / joystick input | notify parsers and conservative routing map implemented (`v.oai.hid` / `v.oai.rad`); exact codes remain gated on physical capture |
 | Bluetooth | supported when the paired Micro exposes its vendor HID interface; transport is reported separately from USB |
 
-Without a claimed device the daemon uses [`MockDevice`](../crates/mb-device/src/lib.rs)
-so CI and headless installs stay green. A detected-but-unclaimed device still shows
-in the UI as **Detected** (not Connected).
+The daemon uses [`MockDevice`](../crates/mb-device/src/lib.rs) only when no supported
+physical device is detected, so CI and headless installs stay green. A
+detected-but-unclaimed Micro remains a `HidDevice`, preserving its
+`codex-micro-<transport>` descriptor and **Detected** UI status (not Connected).
 The daemon refreshes presence every two seconds while keeping explicit Retry
 semantics for a stable device whose claim failed.
 

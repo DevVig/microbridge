@@ -27,6 +27,50 @@ impl DeviceTransport {
             Self::Unknown => "hid",
         }
     }
+
+    fn preference_rank(self) -> u8 {
+        match self {
+            // A cable is the least ambiguous route when firmware exposes both
+            // transports at once. Bluetooth remains preferred over an unknown
+            // backend, and is selected whenever USB is absent.
+            Self::Usb => 0,
+            Self::Bluetooth => 1,
+            Self::Unknown => 2,
+        }
+    }
+}
+
+#[cfg(feature = "hid")]
+pub(crate) fn transport_from_bus_type(bus_type: hidapi::BusType) -> DeviceTransport {
+    match bus_type {
+        hidapi::BusType::Usb => DeviceTransport::Usb,
+        hidapi::BusType::Bluetooth => DeviceTransport::Bluetooth,
+        _ => DeviceTransport::Unknown,
+    }
+}
+
+#[cfg(feature = "hid")]
+pub(crate) fn hid_candidate_sort_key(
+    info: &hidapi::DeviceInfo,
+    preferred_pid: Option<u16>,
+) -> (bool, u8, u16) {
+    candidate_preference_key(
+        info.product_id(),
+        transport_from_bus_type(info.bus_type()),
+        preferred_pid,
+    )
+}
+
+fn candidate_preference_key(
+    product_id: u16,
+    transport: DeviceTransport,
+    preferred_pid: Option<u16>,
+) -> (bool, u8, u16) {
+    (
+        preferred_pid.is_some_and(|pid| product_id != pid),
+        transport.preference_rank(),
+        product_id,
+    )
 }
 
 impl ProbeResult {
@@ -73,25 +117,25 @@ pub fn probe_usb_micro() -> ProbeResult {
 
 #[cfg(feature = "hid")]
 fn probe_hid_micro() -> Result<Option<ProbeResult>, ()> {
-    use hidapi::{BusType, HidApi};
+    use hidapi::HidApi;
 
     let api = HidApi::new().map_err(|_| ())?;
-    let Some(info) = api.device_list().find(|info| {
-        info.vendor_id() == WL_VID
-            && is_supported_pid(info.product_id())
-            && info.usage_page() == crate::WL_USAGE_PAGE
-    }) else {
+    let mut candidates: Vec<_> = api
+        .device_list()
+        .filter(|info| {
+            info.vendor_id() == WL_VID
+                && is_supported_pid(info.product_id())
+                && info.usage_page() == crate::WL_USAGE_PAGE
+        })
+        .collect();
+    candidates.sort_by_key(|info| hid_candidate_sort_key(info, None));
+    let Some(info) = candidates.first() else {
         return Ok(None);
-    };
-    let transport = match info.bus_type() {
-        BusType::Usb => DeviceTransport::Usb,
-        BusType::Bluetooth => DeviceTransport::Bluetooth,
-        _ => DeviceTransport::Unknown,
     };
     Ok(Some(ProbeResult {
         present: true,
         product_id: Some(info.product_id()),
-        transport,
+        transport: transport_from_bus_type(info.bus_type()),
     }))
 }
 
@@ -193,6 +237,36 @@ fn system_profiler_usb_text(timeout: std::time::Duration) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_preference_is_usb_then_bluetooth_then_unknown() {
+        assert!(
+            DeviceTransport::Usb.preference_rank() < DeviceTransport::Bluetooth.preference_rank()
+        );
+        assert!(
+            DeviceTransport::Bluetooth.preference_rank()
+                < DeviceTransport::Unknown.preference_rank()
+        );
+    }
+
+    #[test]
+    fn preferred_pid_precedes_transport_tie_break() {
+        let preferred_bluetooth = candidate_preference_key(
+            CODEX_MICRO_PID,
+            DeviceTransport::Bluetooth,
+            Some(CODEX_MICRO_PID),
+        );
+        let other_usb = candidate_preference_key(
+            crate::ids::CREATOR_MICRO_V2_PIDS[0],
+            DeviceTransport::Usb,
+            Some(CODEX_MICRO_PID),
+        );
+        assert!(preferred_bluetooth < other_usb);
+
+        let preferred_usb =
+            candidate_preference_key(CODEX_MICRO_PID, DeviceTransport::Usb, Some(CODEX_MICRO_PID));
+        assert!(preferred_usb < preferred_bluetooth);
+    }
 
     #[test]
     fn matches_vid_pid_block() {
