@@ -25,6 +25,8 @@ struct AppState {
     bus: BusHandle,
     snapshot: CachedSnapshot,
     bundled_daemon: StdMutex<Option<Child>>,
+    supervise_bundled_daemon: bool,
+    shutting_down: AtomicBool,
 }
 
 fn daemon_socket_path() -> PathBuf {
@@ -91,6 +93,54 @@ fn start_bundled_daemon() -> Option<Child> {
         .find(|candidate| candidate.is_file())?;
 
     spawn_owned_daemon(&binary)
+}
+
+fn should_start_bundled_daemon(
+    daemon_reachable: bool,
+    owned_child_running: bool,
+    supervision_enabled: bool,
+    shutting_down: bool,
+) -> bool {
+    supervision_enabled && !shutting_down && !daemon_reachable && !owned_child_running
+}
+
+/// Keep an installed GUI usable if the daemon it initially discovered exits.
+/// This matters during updater/login overlap: a new UI process may attach to
+/// the old UI's child, then lose that daemon when the old process terminates.
+fn spawn_bundled_daemon_supervisor(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let Some(state) = app.try_state::<AppState>() else {
+                return;
+            };
+            if state.shutting_down.load(Ordering::Acquire) {
+                return;
+            }
+            if daemon_is_reachable() {
+                continue;
+            }
+            let Ok(mut child_slot) = state.bundled_daemon.lock() else {
+                continue;
+            };
+            // Recheck after serializing with app shutdown/restart work.
+            let daemon_reachable = daemon_is_reachable();
+            let owned_child_running = child_slot
+                .as_mut()
+                .is_some_and(|child| matches!(child.try_wait(), Ok(None)));
+            if !owned_child_running {
+                child_slot.take();
+            }
+            if should_start_bundled_daemon(
+                daemon_reachable,
+                owned_child_running,
+                state.supervise_bundled_daemon,
+                state.shutting_down.load(Ordering::Acquire),
+            ) {
+                *child_slot = start_bundled_daemon();
+            }
+        }
+    });
 }
 
 const DAEMON_MIGRATION_MARKER: &str = "app-owned-daemon-v1";
@@ -336,6 +386,15 @@ mod daemon_migration_tests {
             ),
             Some("homebrew.mxcl.microbridge")
         );
+    }
+
+    #[test]
+    fn daemon_supervision_restarts_only_when_the_gui_should_own_recovery() {
+        assert!(should_start_bundled_daemon(false, false, true, false));
+        assert!(!should_start_bundled_daemon(true, false, true, false));
+        assert!(!should_start_bundled_daemon(false, true, true, false));
+        assert!(!should_start_bundled_daemon(false, false, false, false));
+        assert!(!should_start_bundled_daemon(false, false, true, true));
     }
 
     #[test]
@@ -1631,8 +1690,7 @@ struct HardwareMenuPresentation {
 }
 
 fn is_physical_micro(device_name: &str) -> bool {
-    device_name.starts_with("codex-micro-")
-        || device_name.starts_with("creator-micro-v2-")
+    device_name.starts_with("codex-micro-") || device_name.starts_with("creator-micro-v2-")
 }
 
 fn hardware_menu_presentation_for(
@@ -1982,12 +2040,12 @@ pub fn run() {
             }
 
             migrate_legacy_ui_login_item();
-            let bundled_daemon = match migrate_legacy_daemon_to_app() {
-                Ok(Some(child)) => Some(child),
-                Ok(None) => start_bundled_daemon(),
+            let (bundled_daemon, supervise_bundled_daemon) = match migrate_legacy_daemon_to_app() {
+                Ok(Some(child)) => (Some(child), true),
+                Ok(None) => (start_bundled_daemon(), true),
                 // The legacy service was restored; do not race it with a
                 // second daemon if the migration could not be completed.
-                Err(()) => None,
+                Err(()) => (None, false),
             };
             let (bus, mut event_rx) = spawn_bus_loop();
             let snapshot: CachedSnapshot = Arc::new(Mutex::new(None));
@@ -2143,7 +2201,10 @@ pub fn run() {
                 bus,
                 snapshot,
                 bundled_daemon: StdMutex::new(bundled_daemon),
+                supervise_bundled_daemon,
+                shutting_down: AtomicBool::new(false),
             });
+            spawn_bundled_daemon_supervisor(app.handle().clone());
 
             // Dedicated monochrome tray glyph (bridge silhouette), rendered as a
             // template image so macOS tints it for light/dark menu bars. The full
@@ -2303,6 +2364,7 @@ pub fn run() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.shutting_down.store(true, Ordering::Release);
                     if let Ok(mut guard) = state.bundled_daemon.lock() {
                         if let Some(mut child) = guard.take() {
                             let _ = child.kill();
