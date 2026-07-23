@@ -40,6 +40,13 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "==> Removing menu bar app"
     "$APP/Contents/MacOS/microbridge-ui" \
       --unregister-login-item 2>/dev/null || true
+    while read -r pid; do
+      kill "$pid" 2>/dev/null || true
+    done < <(/usr/bin/pgrep -f "^${APP}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      /usr/bin/pgrep -f "^${APP}/Contents/MacOS/microbridge-ui$" >/dev/null 2>&1 || break
+      /bin/sleep 0.1
+    done
     rm -rf "$APP"
     rm -f "$SOURCE_MARKER" "$BREW_MARKER" "$RELEASE_MARKER"
   elif [[ -d "$APP" ]]; then

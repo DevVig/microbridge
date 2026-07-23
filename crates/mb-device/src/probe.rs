@@ -1,4 +1,4 @@
-//! Best-effort USB presence probe — does not claim the HID interface.
+//! Best-effort HID presence probe — does not claim the HID interface.
 
 use crate::ids::{is_supported_pid, CODEX_MICRO_PID, WL_VID};
 
@@ -6,8 +6,27 @@ use crate::ids::{is_supported_pid, CODEX_MICRO_PID, WL_VID};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeResult {
     pub present: bool,
-    /// Best-effort product id when parsed from the host USB listing.
+    /// Best-effort product id reported by the HID registry or host USB listing.
     pub product_id: Option<u16>,
+    pub transport: DeviceTransport,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeviceTransport {
+    Usb,
+    Bluetooth,
+    #[default]
+    Unknown,
+}
+
+impl DeviceTransport {
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::Usb => "usb",
+            Self::Bluetooth => "bluetooth",
+            Self::Unknown => "hid",
+        }
+    }
 }
 
 impl ProbeResult {
@@ -15,16 +34,34 @@ impl ProbeResult {
         Self {
             present: false,
             product_id: None,
+            transport: DeviceTransport::Unknown,
         }
     }
 }
 
-/// Probe for a supported Work Louder / Codex Micro USB device.
+/// Probe for a supported Work Louder / Codex Micro HID device.
+///
+/// The HID registry is authoritative because macOS exposes both USB and BLE
+/// HID devices there. `system_profiler` remains a USB-only fallback for builds
+/// compiled without the optional HID backend or if HID initialization fails.
 pub fn probe_usb_micro() -> ProbeResult {
+    #[cfg(feature = "hid")]
+    match probe_hid_micro() {
+        Ok(Some(result)) => return result,
+        Ok(None) => return ProbeResult::absent(),
+        Err(()) => {}
+    }
+
     #[cfg(target_os = "macos")]
     {
         match system_profiler_usb_text(std::time::Duration::from_secs(3)) {
-            Some(text) => match_usb_text(&text),
+            Some(text) => {
+                let mut result = match_usb_text(&text);
+                if result.present {
+                    result.transport = DeviceTransport::Usb;
+                }
+                result
+            }
             None => ProbeResult::absent(),
         }
     }
@@ -32,6 +69,30 @@ pub fn probe_usb_micro() -> ProbeResult {
     {
         ProbeResult::absent()
     }
+}
+
+#[cfg(feature = "hid")]
+fn probe_hid_micro() -> Result<Option<ProbeResult>, ()> {
+    use hidapi::{BusType, HidApi};
+
+    let api = HidApi::new().map_err(|_| ())?;
+    let Some(info) = api.device_list().find(|info| {
+        info.vendor_id() == WL_VID
+            && is_supported_pid(info.product_id())
+            && info.usage_page() == crate::WL_USAGE_PAGE
+    }) else {
+        return Ok(None);
+    };
+    let transport = match info.bus_type() {
+        BusType::Usb => DeviceTransport::Usb,
+        BusType::Bluetooth => DeviceTransport::Bluetooth,
+        _ => DeviceTransport::Unknown,
+    };
+    Ok(Some(ProbeResult {
+        present: true,
+        product_id: Some(info.product_id()),
+        transport,
+    }))
 }
 
 /// Match `system_profiler SPUSBDataType` (or similar) text against known IDs.
@@ -44,6 +105,7 @@ pub fn match_usb_text(raw: &str) -> ProbeResult {
             return ProbeResult {
                 present: true,
                 product_id: Some(pid),
+                transport: DeviceTransport::Usb,
             };
         }
     }
@@ -57,6 +119,7 @@ pub fn match_usb_text(raw: &str) -> ProbeResult {
         return ProbeResult {
             present: true,
             product_id: Some(CODEX_MICRO_PID),
+            transport: DeviceTransport::Usb,
         };
     }
 
@@ -143,6 +206,7 @@ Codex Micro:
         let r = match_usb_text(sample);
         assert!(r.present);
         assert_eq!(r.product_id, Some(CODEX_MICRO_PID));
+        assert_eq!(r.transport, DeviceTransport::Usb);
     }
 
     #[test]

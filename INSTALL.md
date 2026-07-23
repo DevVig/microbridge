@@ -39,6 +39,7 @@ Uninstall:
 
 ```sh
 microbridge-app uninstall
+brew services stop microbridge       # no-op unless headless mode was enabled
 brew uninstall microbridge
 # optional: brew untap DevVig/microbridge
 ```
@@ -58,7 +59,7 @@ Governance / why this path: [docs/governance.md](docs/governance.md).
 |---|---|
 | macOS (Homebrew) | Homebrew + **Xcode Command Line Tools** (`xcode-select --install`); Rust + Node pulled in as **build** deps (builds `.app` + daemon) |
 | From source | Rust stable, Node ≥ 20; macOS also needs Xcode CLT for the `.app` |
-| Hardware LEDs/keys | Codex Micro over USB; claim it from the popover, the menu-bar icon’s right-click menu, or **Settings → Device** (`MICROBRIDGE_HID_CLAIM=1` remains a developer override) |
+| Hardware LEDs/keys | Codex Micro over USB-C or Bluetooth; claim it from the popover, the menu-bar icon’s right-click menu, or **Settings → Device** (`MICROBRIDGE_HID_CLAIM=1` remains a developer override) |
 
 ## From source (developers)
 
@@ -197,9 +198,11 @@ headless operation:
 brew services restart microbridge
 ```
 
-**LEDs stay dark** — by default Microbridge only probes USB (Detected). Choose
+**LEDs stay dark** — by default Microbridge detects but does not control the
+USB/Bluetooth HID interface. Choose
 **Claim Codex Micro** in the popover or right-click menu. If the interface is
-busy, pause the other device owner and choose **Retry**. The advanced control
+busy, allow Microbridge under **System Settings → Privacy & Security → Input
+Monitoring**, pause the other device owner, and choose **Retry**. The advanced control
 also remains in **Settings → Device**. Developers can still set
 `MICROBRIDGE_HID_CLAIM=1` before starting the daemon. See
 [docs/device-hid.md](docs/device-hid.md).

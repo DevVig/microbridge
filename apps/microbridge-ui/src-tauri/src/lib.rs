@@ -1589,11 +1589,50 @@ fn trigger_update_check(app: &AppHandle) {
     let _ = app.emit("menu://check-updates", ());
 }
 
+#[cfg(target_os = "macos")]
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOHIDCheckAccess(request_type: i32) -> i32;
+    fn IOHIDRequestAccess(request_type: i32) -> bool;
+}
+
+/// Ask for the Input Monitoring grant that macOS requires before a process may
+/// receive reports from keyboard-class IOHID devices. The request originates
+/// from the signed main app so System Settings attributes it to Microbridge,
+/// not to the bundled daemon executable.
+#[tauri::command]
+fn request_input_monitoring_access() -> bool {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        // IOHIDLib.h: ListenEvent = 1; Granted = 0; Denied = 1;
+        // Unknown = 2. A denied request will not show the consent prompt
+        // again, so take the user directly to the relevant System Settings
+        // pane on their next explicit Claim/Retry action.
+        match IOHIDCheckAccess(1) {
+            0 => true,
+            1 => {
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+                    .spawn();
+                false
+            }
+            _ => IOHIDRequestAccess(1),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct HardwareMenuPresentation {
     label: &'static str,
     enabled: bool,
     target_enabled: Option<bool>,
+}
+
+fn is_physical_micro(device_name: &str) -> bool {
+    device_name.starts_with("codex-micro-")
+        || device_name.starts_with("creator-micro-v2-")
 }
 
 fn hardware_menu_presentation_for(
@@ -1608,7 +1647,7 @@ fn hardware_menu_presentation_for(
             target_enabled: Some(false),
         };
     }
-    if device_name.contains("usb") {
+    if is_physical_micro(device_name) {
         return HardwareMenuPresentation {
             label: if control_requested {
                 "Retry Codex Micro Claim"
@@ -1655,6 +1694,10 @@ async fn apply_hardware_menu_action(app: AppHandle) -> Result<(), String> {
         config
     };
 
+    if config.hardware_control_enabled {
+        let _ = request_input_monitoring_access();
+    }
+
     // Preserve the daemon's normalized response as the source of truth.
     let next = state.bus.set_config(config.clone()).await?;
     config = next;
@@ -1683,6 +1726,10 @@ mod hardware_menu_tests {
         assert_eq!(
             hardware_menu_presentation_for(false, "codex-micro-usb", true).label,
             "Retry Codex Micro Claim"
+        );
+        assert_eq!(
+            hardware_menu_presentation_for(false, "codex-micro-bluetooth", false).label,
+            "Claim Codex Micro"
         );
         assert_eq!(
             hardware_menu_presentation_for(true, "codex-micro-usb", false).label,
@@ -2244,6 +2291,7 @@ pub fn run() {
             quit_ui,
             update_channel,
             app_version,
+            request_input_monitoring_access,
             launch_at_login_status,
             set_launch_at_login,
             open_login_items_settings,

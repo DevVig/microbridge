@@ -34,7 +34,9 @@ on merge, auto-merge enabled.
 1. Land changes on `main` via PR.
 2. Tag `vX.Y.Z` and push the tag → **Release** workflow builds archives and
    updates the Homebrew formula checksums.
-3. Users upgrade with `brew update && brew upgrade microbridge`.
+3. Users upgrade with `brew update && brew upgrade microbridge`, then run
+   `microbridge-app install` to refresh the marker-owned signed app (the full
+   workflow is below).
 
 ## macOS install + auto-update (Homebrew)
 

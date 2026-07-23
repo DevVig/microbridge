@@ -12,6 +12,7 @@ use hidapi::{HidApi, HidDevice as RawHid};
 use crate::framing::{frame_rpc, parse_report, CHANNEL_RPC, REPORT_ID};
 use crate::ids::{is_supported_pid, product_name, WL_USAGE_PAGE, WL_VID};
 use crate::rpc::{parse_notify, DeviceNotify};
+use crate::DeviceTransport;
 
 /// Open the first matching vendor HID interface (usage page `0xFF00`).
 ///
@@ -44,6 +45,11 @@ pub fn open_device(preferred_pid: Option<u16>) -> Result<ClaimedDevice, String> 
 
     let product_id = info.product_id();
     let name = product_name(product_id).to_string();
+    let transport = match info.bus_type() {
+        hidapi::BusType::Usb => DeviceTransport::Usb,
+        hidapi::BusType::Bluetooth => DeviceTransport::Bluetooth,
+        _ => DeviceTransport::Unknown,
+    };
     let device = api
         .open_path(info.path())
         .map_err(|e| format!("open_path failed: {e}"))?;
@@ -53,6 +59,7 @@ pub fn open_device(preferred_pid: Option<u16>) -> Result<ClaimedDevice, String> 
         device: Mutex::new(device),
         product_id,
         name,
+        transport,
         rpc_id: 1,
         rx_buf: String::new(),
         pending: Vec::new(),
@@ -64,6 +71,7 @@ pub struct ClaimedDevice {
     device: Mutex<RawHid>,
     pub product_id: u16,
     pub name: String,
+    pub transport: DeviceTransport,
     rpc_id: u32,
     rx_buf: String,
     pending: Vec<DeviceNotify>,

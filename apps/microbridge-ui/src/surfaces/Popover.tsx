@@ -8,7 +8,7 @@ import {
 } from "../lib/threads";
 import { usePopoverFit } from "../lib/popoverFit";
 import { DeviceEcho } from "../components/DeviceEcho";
-import { hardwareControlState } from "../lib/hardwareControl";
+import { hardwareControlState, isPhysicalMicro } from "../lib/hardwareControl";
 
 const MicroGlyph = ({ color }: { color: string }) => (
   <svg
@@ -89,7 +89,7 @@ export function Popover({
   const simulator = snapshot.device_name === "mock" || demo;
   const daemonOffline = snapshot.device_name === "daemon-offline";
   const detected =
-    !snapshot.device_connected && snapshot.device_name.includes("usb");
+    !snapshot.device_connected && isPhysicalMicro(snapshot.device_name);
   const hardwareControl = hardwareControlState(snapshot);
   const unavailableHardwareTitle = daemonOffline
     ? "Microbridge daemon offline"
@@ -102,7 +102,7 @@ export function Popover({
     ? "Reopen Microbridge to restart its bundled daemon."
     : demo
       ? "Open the installed menu-bar app for live hardware control."
-      : "Connect the device over USB-C to make hardware control available.";
+      : "Connect the device over Bluetooth or USB-C to make hardware control available.";
   // Show the live UI shell in simulator/detected modes; only "Connected"
   // means Microbridge actually owns the HID interface.
   const showLiveShell =
@@ -240,7 +240,7 @@ export function Popover({
               {hardwareControl === "connected"
                 ? "Keys, dial, joystick, and lighting are active."
                 : hardwareControl === "claim_failed"
-                  ? "Another app may own the HID interface. Close it, then retry."
+                  ? "Allow Microbridge in Input Monitoring, close any other HID owner, then retry."
                   : hardwareControl === "available"
                     ? "Let Microbridge use its keys, dial, joystick, and lighting."
                     : unavailableHardwareDescription}
@@ -427,7 +427,7 @@ export function Popover({
             >
               {daemonOffline
                 ? "No live daemon connection is available, so the app is showing no threads rather than simulated data."
-                : "Plug in over USB-C, then claim the Codex Micro here or from the menu-bar icon’s right-click menu. Microbridge keeps observing threads if another app owns the HID interface."}
+                : "Connect over Bluetooth or USB-C, then claim the Codex Micro here or from the menu-bar icon’s right-click menu. Microbridge keeps observing threads if another app owns the HID interface."}
             </p>
           </div>
         )}

@@ -47,7 +47,8 @@ fi
 ASSET="microbridge-${TAG}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+APP_STAGING=""
+trap 'rm -rf "$TMP"; if [[ -n "${APP_STAGING:-}" ]]; then rm -rf "$APP_STAGING"; fi' EXIT
 
 echo "==> Downloading $URL"
 if ! curl -fsSL -o "$TMP/$ASSET" "$URL"; then
@@ -79,6 +80,7 @@ if [[ "$OS" == "Darwin" ]]; then
       return 0
     fi
     local STAGING="$HOME/Applications/.Microbridge.app.installing.$$"
+    APP_STAGING="$STAGING"
     mkdir -p "$HOME/Applications"
     rm -rf "$STAGING"
     /usr/bin/ditto "$APP_SRC" "$STAGING"
@@ -87,9 +89,14 @@ if [[ "$OS" == "Darwin" ]]; then
       while read -r pid; do
         kill "$pid" 2>/dev/null || true
       done < <(/usr/bin/pgrep -f "^${DEST}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        /usr/bin/pgrep -f "^${DEST}/Contents/MacOS/microbridge-ui$" >/dev/null 2>&1 || break
+        /bin/sleep 0.1
+      done
     fi
     rm -rf "$DEST"
     mv "$STAGING" "$DEST"
+    APP_STAGING=""
     xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
     touch "$MARKER"
     rm -f "$LEGACY_MARKER"

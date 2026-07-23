@@ -1,6 +1,7 @@
 import type { Snapshot } from "../lib/types";
 import { agentKeyLedFrame } from "../lib/types";
 import type { ThemeTokens } from "../lib/theme";
+import { deviceTransportLabel, isPhysicalMicro } from "../lib/hardwareControl";
 
 /**
  * Miniature, read-only echo of the kbd-1.0 deck (MagicPath AgentKeyEcho).
@@ -111,7 +112,8 @@ export function DeviceEcho({
   const connected =
     snapshot.device_connected ||
     snapshot.device_name === "mock" ||
-    snapshot.device_name.includes("usb");
+    isPhysicalMicro(snapshot.device_name);
+  const transport = deviceTransportLabel(snapshot.device_name);
   return (
     <div className="flex flex-col items-center gap-1.5">
       <div
@@ -201,8 +203,8 @@ export function DeviceEcho({
       <span className="text-[10px] font-medium" style={{ color: t.textMuted }}>
         {snapshot.device_connected
           ? "Live on your deck · read-only"
-          : snapshot.device_name.includes("usb")
-            ? "USB detected · HID map pending"
+          : isPhysicalMicro(snapshot.device_name)
+            ? `${transport ?? "HID"} detected · hardware control available`
             : snapshot.device_name === "mock"
               ? "Simulator · read-only"
               : "Deck offline"}

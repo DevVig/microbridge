@@ -1,6 +1,6 @@
 {
   "name": "@microbridge/adapter-sdk",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Zero-dependency SDK for publishing AI agent session states to Microbridge",
   "main": "index.mjs",
   "type": "module",

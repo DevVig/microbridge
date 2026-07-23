@@ -88,11 +88,16 @@ async fn main() -> std::io::Result<()> {
     let input_bus = Arc::clone(&shared);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        let mut next_device_probe = tokio::time::Instant::now();
         loop {
             interval.tick().await;
             let mut state = input_bus.lock().await;
             state.poll_device_inputs();
             state.expire_leased_sessions();
+            if tokio::time::Instant::now() >= next_device_probe {
+                state.refresh_device_presence();
+                next_device_probe = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+            }
         }
     });
 
