@@ -2,7 +2,7 @@
 
 use crate::ids::{is_supported_pid, CODEX_MICRO_PID, WL_VID};
 
-/// Result of a non-claiming USB probe.
+/// Result of a non-claiming HID-registry probe, with a USB fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeResult {
     pub present: bool,

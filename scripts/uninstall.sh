@@ -8,6 +8,10 @@ UI_LABEL="ai.microbridge.ui"
 BREW_LABEL="homebrew.mxcl.microbridge"
 PURGE=0
 
+regex_escape() {
+  printf '%s\n' "$1" | /usr/bin/sed 's/[][(){}.^$*+?|\\/]/\\&/g'
+}
+
 usage() {
   cat <<EOF
 Usage: ./scripts/uninstall.sh [--purge]
@@ -40,11 +44,12 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "==> Removing menu bar app"
     "$APP/Contents/MacOS/microbridge-ui" \
       --unregister-login-item 2>/dev/null || true
+    APP_COMMAND_PATTERN="^$(regex_escape "$APP/Contents/MacOS/microbridge-ui")$"
     while read -r pid; do
       kill "$pid" 2>/dev/null || true
-    done < <(/usr/bin/pgrep -f "^${APP}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+    done < <(/usr/bin/pgrep -f "$APP_COMMAND_PATTERN" 2>/dev/null || true)
     for _ in 1 2 3 4 5 6 7 8 9 10; do
-      /usr/bin/pgrep -f "^${APP}/Contents/MacOS/microbridge-ui$" >/dev/null 2>&1 || break
+      /usr/bin/pgrep -f "$APP_COMMAND_PATTERN" >/dev/null 2>&1 || break
       /bin/sleep 0.1
     done
     rm -rf "$APP"

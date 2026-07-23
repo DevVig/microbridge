@@ -86,11 +86,13 @@ if [[ "$OS" == "Darwin" ]]; then
     /usr/bin/ditto "$APP_SRC" "$STAGING"
     /usr/bin/codesign --verify --deep --strict "$STAGING"
     if [[ -d "$DEST" ]]; then
+      local APP_COMMAND_PATTERN
+      APP_COMMAND_PATTERN="^$(printf '%s\n' "$DEST/Contents/MacOS/microbridge-ui" | /usr/bin/sed 's/[][(){}.^$*+?|\\/]/\\&/g')$"
       while read -r pid; do
         kill "$pid" 2>/dev/null || true
-      done < <(/usr/bin/pgrep -f "^${DEST}/Contents/MacOS/microbridge-ui$" 2>/dev/null || true)
+      done < <(/usr/bin/pgrep -f "$APP_COMMAND_PATTERN" 2>/dev/null || true)
       for _ in 1 2 3 4 5 6 7 8 9 10; do
-        /usr/bin/pgrep -f "^${DEST}/Contents/MacOS/microbridge-ui$" >/dev/null 2>&1 || break
+        /usr/bin/pgrep -f "$APP_COMMAND_PATTERN" >/dev/null 2>&1 || break
         /bin/sleep 0.1
       done
     fi
