@@ -29,6 +29,10 @@ const KEYCHAIN_ACCOUNT: &str = "paired-environment";
 /// accepted — T3 ships nightlies with the same shell/dispatch surface.
 const SUPPORTED_SERVER_VERSIONS: &[&str] = &["0.0.28", "0.0.29"];
 const PINNED_CONTRACT_COMMIT: &str = "5d34f9ff235115d43a6cb4b4561d10badf218b87";
+/// How long to wait before re-reading the Keychain while unpaired. Short enough
+/// that pairing feels immediate, long enough not to poll a secure store on the
+/// adapter's normal tick.
+const UNPAIRED_RECHECK: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct T3Credential {
@@ -46,6 +50,30 @@ struct TokenResponse {
 struct EnvironmentDescriptor {
     server_version: String,
     environment_id: String,
+    /// Feature flags the environment advertises for its own build. Absent on
+    /// older servers, hence `default`.
+    #[serde(default)]
+    capabilities: EnvironmentCapabilities,
+}
+
+/// What the paired environment says it supports.
+///
+/// Read so Microbridge advertises what *this* environment can do rather than
+/// what the pinned contract version could do in general — a nightly can gain or
+/// lose a surface without the base version moving.
+///
+/// Unknown keys are ignored, so new flags are additive.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct EnvironmentCapabilities {
+    /// `thread.settle` / `thread.unsettle` are accepted.
+    thread_settlement: bool,
+    /// `thread.snooze` / `thread.unsnooze` are accepted.
+    thread_snooze: bool,
+    /// The environment exposes a cheap liveness probe.
+    connection_probe: bool,
+    /// Threads carry repository identity.
+    repository_identity: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -281,6 +309,7 @@ pub fn spawn(
         let mut credential: Option<T3Credential> = None;
         let mut verified_version: Option<String> = None;
         let mut environment_id: Option<String> = None;
+        let mut environment_capabilities = EnvironmentCapabilities::default();
         let mut was_enabled = false;
         let mut failures = 0u32;
         let mut retry_after = tokio::time::Instant::now();
@@ -297,6 +326,7 @@ pub fn spawn(
                         credential = None;
                         verified_version = None;
                         environment_id = None;
+                        environment_capabilities = EnvironmentCapabilities::default();
                         runtime.clear();
                         continue;
                     }
@@ -306,6 +336,15 @@ pub fn spawn(
                     }
                     if credential.is_none() {
                         credential = load_credential().ok();
+                        if credential.is_none() {
+                            // Unpaired. `load_credential` reads the macOS
+                            // Keychain, so retrying on the 900 ms tick means
+                            // thousands of Keychain hits an hour for a state
+                            // only the user can change. Back off; pairing is
+                            // picked up on the next attempt.
+                            retry_after = tokio::time::Instant::now() + UNPAIRED_RECHECK;
+                            continue;
+                        }
                     }
                     let Some(active) = credential.as_ref() else { continue };
                     if verified_version.is_none() {
@@ -313,6 +352,7 @@ pub fn spawn(
                             Ok(descriptor) if contract_is_supported(&descriptor.server_version) => {
                                 verified_version = Some(descriptor.server_version.clone());
                                 environment_id = Some(descriptor.environment_id.clone());
+                                environment_capabilities = descriptor.capabilities;
                                 shared.lock().await.set_adapter_version(
                                     "t3code",
                                     Some(descriptor.server_version),
@@ -356,13 +396,14 @@ pub fn spawn(
                         Ok(snapshot) => {
                             failures = 0;
                             retry_after = tokio::time::Instant::now();
-                            apply_snapshot(&shared, snapshot, &mut runtime).await
+                            apply_snapshot(&shared, snapshot, &mut runtime, environment_capabilities).await
                         },
                         Err(T3HttpError::Unauthorized) => {
                             let _ = forget_credential();
                             credential = None;
                             verified_version = None;
                             environment_id = None;
+                            environment_capabilities = EnvironmentCapabilities::default();
                             runtime.clear();
                             let mut state = shared.lock().await;
                             state.remove_owner_sessions(T3_OWNER);
@@ -470,6 +511,7 @@ async fn apply_snapshot(
     shared: &Arc<Mutex<DaemonState>>,
     snapshot: ShellSnapshot,
     runtime: &mut HashMap<String, RuntimeThread>,
+    environment: EnvironmentCapabilities,
 ) {
     let mut state = shared.lock().await;
     let incoming: HashSet<String> = snapshot
@@ -509,8 +551,36 @@ async fn apply_snapshot(
         "t3code",
         AdapterConnectionState::Limited,
         capabilities(),
-        "Paired lifecycle, approvals, interrupt, and native thread focus are ready. Effort remains disabled until T3 advertises provider option descriptors.",
+        environment_diagnostic(environment),
     );
+}
+
+/// Report what the paired environment advertises, not just what we drive.
+///
+/// `capabilities()` deliberately stays the set `dispatch_action` implements. But
+/// the environment now advertises thread-lifecycle surfaces (settle / snooze)
+/// that Microbridge has no lever for yet, and silently omitting them makes the
+/// card read as though T3 offers nothing more. Naming them keeps the card
+/// truthful and records what a future lever would bind to.
+fn environment_diagnostic(environment: EnvironmentCapabilities) -> String {
+    let mut unwired = Vec::new();
+    if environment.thread_settlement {
+        unwired.push("settle");
+    }
+    if environment.thread_snooze {
+        unwired.push("snooze");
+    }
+    let mut diagnostic = String::from(
+        "Paired lifecycle, approvals, interrupt, and native thread focus are ready. \
+         Effort remains disabled until T3 advertises provider option descriptors.",
+    );
+    if !unwired.is_empty() {
+        diagnostic.push_str(&format!(
+            " This environment also advertises thread {} — not yet bound to a key.",
+            unwired.join(" / ")
+        ));
+    }
+    diagnostic
 }
 
 fn map_state(thread: &ThreadShell) -> AgentState {
@@ -733,6 +803,57 @@ mod tests {
             updated_at: "2026-07-18T12:00:00Z".into(),
         };
         assert_eq!(map_state(&thread), AgentState::AwaitingApproval);
+    }
+
+    /// Verbatim response from a live T3 Code (Nightly) 0.0.29-nightly.20260725.899
+    /// environment. Guards two things at once: that the new `capabilities` object
+    /// decodes, and that older descriptors without it still do.
+    #[test]
+    fn decodes_the_live_environment_descriptor_with_capabilities() {
+        let body = r#"{
+            "environmentId": "ab7f111b-1fcd-49a1-a15b-939ddf690b1d",
+            "label": "Jonathan's MacBook Pro",
+            "platform": { "os": "darwin", "arch": "arm64" },
+            "serverVersion": "0.0.29-nightly.20260725.899",
+            "capabilities": {
+                "repositoryIdentity": true,
+                "connectionProbe": true,
+                "threadSettlement": true,
+                "threadSnooze": true,
+                "serverSelfUpdate": "desktop-managed"
+            }
+        }"#;
+        let descriptor: EnvironmentDescriptor = serde_json::from_str(body).unwrap();
+        assert_eq!(descriptor.server_version, "0.0.29-nightly.20260725.899");
+        assert!(contract_is_supported(&descriptor.server_version));
+        assert!(descriptor.capabilities.thread_settlement);
+        assert!(descriptor.capabilities.thread_snooze);
+        assert!(descriptor.capabilities.connection_probe);
+        assert!(descriptor.capabilities.repository_identity);
+
+        // `serverSelfUpdate` is a string, not a bool — unknown keys must not
+        // break decoding, or one new flag takes the whole adapter offline.
+        let legacy: EnvironmentDescriptor =
+            serde_json::from_str(r#"{"environmentId":"e","serverVersion":"0.0.28"}"#).unwrap();
+        assert!(!legacy.capabilities.thread_settlement);
+    }
+
+    #[test]
+    fn diagnostic_names_advertised_but_unwired_surfaces() {
+        let none = environment_diagnostic(EnvironmentCapabilities::default());
+        assert!(!none.contains("also advertises"), "{none}");
+
+        let both = environment_diagnostic(EnvironmentCapabilities {
+            thread_settlement: true,
+            thread_snooze: true,
+            ..Default::default()
+        });
+        assert!(both.contains("thread settle / snooze"), "{both}");
+        // Reading a capability from the descriptor must never be mistaken for
+        // implementing the lever: T3 exposes no effort concept, and thread
+        // creation needs a project + model registry we do not have.
+        assert!(!capabilities().reasoning_effort);
+        assert!(!capabilities().new_session);
     }
 
     #[test]
