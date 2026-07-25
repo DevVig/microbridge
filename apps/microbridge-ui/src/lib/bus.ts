@@ -43,6 +43,7 @@ const DEMO: Snapshot = {
     app_priority: [],
     custom_key_ids: ["", "", "", "", "", ""],
     pinned_focus: null,
+    controlling_ide: null,
     approvals_interrupt: true,
     pause_leds: false,
     appearance: "system",

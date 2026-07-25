@@ -15,11 +15,17 @@ use std::time::Duration;
 use bus::{apply_event, spawn_bus_loop, BusHandle, CachedSnapshot};
 use mb_protocol::{BusEvent, ClientMessage, DaemonConfig, ServerMessage, Snapshot};
 use tauri::{
-    menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
 use tokio::sync::Mutex;
+
+/// Tray icon id, so the bus loop can retrieve it to refresh the tooltip.
+const TRAY_ID: &str = "microbridge-tray";
+/// Menu item id prefix for the "Controlled by" submenu.
+const CONTROLLER_PREFIX: &str = "controller:";
+const CONTROLLER_AUTO: &str = "controller:auto";
 
 struct AppState {
     bus: BusHandle,
@@ -27,6 +33,18 @@ struct AppState {
     bundled_daemon: StdMutex<Option<Child>>,
     supervise_bundled_daemon: bool,
     shutting_down: AtomicBool,
+}
+
+/// Live handles into the "Controlled by" submenu.
+///
+/// The submenu is built once during `setup`, so its items have to be retained
+/// somewhere to keep checkmarks, labels and enablement in step with the daemon.
+struct ControllerMenu {
+    /// Disabled first row: what actually owns the deck right now. With a
+    /// tray-only picker this is the one place a fallback can be explained.
+    status: MenuItem<tauri::Wry>,
+    auto: CheckMenuItem<tauri::Wry>,
+    ides: Vec<(&'static str, CheckMenuItem<tauri::Wry>)>,
 }
 
 fn daemon_socket_path() -> PathBuf {
@@ -2022,6 +2040,186 @@ mod login_item_tests {
     }
 }
 
+/// What the deck is actually following, which is not always what was pinned.
+struct ControllerView {
+    /// Pinned family, if any.
+    pinned: Option<String>,
+    /// True when the pinned IDE has at least one live session, i.e. the lock is
+    /// really in force. False means the daemon fell back to most-recent.
+    honored: bool,
+    /// Label of the IDE the deck ended up on while falling back.
+    following: Option<String>,
+}
+
+impl ControllerView {
+    fn of(snapshot: &Snapshot) -> Self {
+        let pinned = snapshot.config.controlling_ide.clone();
+        // Same matcher the daemon's focus policy uses, so "is the lock live?"
+        // cannot be answered differently here than it was there.
+        let honored = pinned.as_deref().is_some_and(|family| {
+            snapshot
+                .sessions
+                .iter()
+                .any(|session| mb_protocol::ide::family_for_app(&session.app) == family)
+        });
+        // Only meaningful while falling back; the daemon's focused session is
+        // the authority on where the deck actually went.
+        let following = (pinned.is_some() && !honored)
+            .then(|| {
+                let focused = snapshot.focused_session_id.as_deref()?;
+                let session = snapshot.sessions.iter().find(|s| s.id == focused)?;
+                Some(session.app.clone())
+            })
+            .flatten();
+        Self {
+            pinned,
+            honored,
+            following,
+        }
+    }
+
+    fn status_line(&self) -> String {
+        let Some(family) = self.pinned.as_deref() else {
+            return "Following the frontmost app".into();
+        };
+        let label = mb_protocol::ide::label_for_family(family);
+        if self.honored {
+            return format!("{label} owns the deck");
+        }
+        match &self.following {
+            Some(following) => {
+                format!("{label} · no live threads — following {following}")
+            }
+            None => format!("{label} · no live threads"),
+        }
+    }
+
+    fn tooltip(&self) -> String {
+        let Some(family) = self.pinned.as_deref() else {
+            return "Microbridge".into();
+        };
+        let label = mb_protocol::ide::label_for_family(family);
+        if self.honored {
+            return format!("Microbridge — {label}");
+        }
+        match &self.following {
+            Some(following) => format!("Microbridge — {label} (idle · following {following})"),
+            None => format!("Microbridge — {label} (idle)"),
+        }
+    }
+}
+
+/// An IDE is pickable when at least one adapter that can feed it is enabled.
+/// Without this a user could pin an IDE that has no way to report a session and
+/// see nothing happen.
+fn ide_has_enabled_provider(snapshot: &Snapshot, providers: &[&str]) -> bool {
+    providers.iter().any(|provider| {
+        snapshot
+            .config
+            .adapters
+            .get(*provider)
+            .is_some_and(|preference| preference.enabled)
+    })
+}
+
+/// Push daemon state into the retained menu items and the tray tooltip.
+fn sync_controller_menu(app: &AppHandle, snapshot: &Snapshot) {
+    let view = ControllerView::of(snapshot);
+    let status = view.status_line();
+    let tooltip = view.tooltip();
+    let pinned = view.pinned.clone();
+    let enabled: Vec<(&'static str, bool)> = mb_protocol::IDES
+        .iter()
+        .map(|ide| {
+            (
+                ide.family,
+                ide_has_enabled_provider(snapshot, ide.providers),
+            )
+        })
+        .collect();
+
+    let handle = app.clone();
+    // AppKit menu mutation is main-thread-only; the bus loop is not the main thread.
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+            let _ = tray.set_tooltip(Some(&tooltip));
+        }
+        let Some(menu) = handle.try_state::<ControllerMenu>() else {
+            // Expected only for events that beat `setup`'s `app.manage`; the next
+            // one catches up. If it persists the submenu is silently frozen, so
+            // say something rather than leaving stale checkmarks unexplained.
+            eprintln!("microbridge-ui: controller menu state unavailable; skipping sync");
+            return;
+        };
+        let _ = menu.status.set_text(&status);
+        let _ = menu.auto.set_checked(pinned.is_none());
+        for (family, item) in &menu.ides {
+            let _ = item.set_checked(pinned.as_deref() == Some(*family));
+            let has_provider = enabled
+                .iter()
+                .find(|(candidate, _)| candidate == family)
+                .map(|(_, value)| *value)
+                .unwrap_or(false);
+            // Keep a pinned IDE selectable even if its providers were since
+            // disabled, so the user can always see and clear the current choice.
+            let selectable = has_provider || pinned.as_deref() == Some(*family);
+            let _ = item.set_enabled(selectable);
+            let label = mb_protocol::ide::label_for_family(family);
+            let _ = item.set_text(if selectable {
+                label.to_string()
+            } else {
+                format!("{label} — enable in Settings")
+            });
+        }
+    });
+}
+
+/// Persist a controller choice made from the tray.
+fn choose_controller(app: &AppHandle, family: Option<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        let Some(mut config) = state
+            .snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map(|s| s.config.clone())
+        else {
+            return;
+        };
+        if config.controlling_ide == family {
+            return;
+        }
+        config.controlling_ide = family;
+        match state.bus.set_config(config).await {
+            Ok(next) => {
+                let mut guard = state.snapshot.lock().await;
+                if let Some(snapshot) = guard.as_mut() {
+                    snapshot.config = next;
+                    let payload = snapshot.clone();
+                    drop(guard);
+                    let _ = app.emit("bus-snapshot", &payload);
+                    sync_controller_menu(&app, &payload);
+                }
+            }
+            Err(error) => {
+                // The daemon rejected it — leave the checkmarks describing the
+                // config that is actually in force rather than the attempt.
+                eprintln!("microbridge-ui: could not set controlling IDE: {error}");
+                let guard = state.snapshot.lock().await;
+                if let Some(snapshot) = guard.as_ref() {
+                    let payload = snapshot.clone();
+                    drop(guard);
+                    sync_controller_menu(&app, &payload);
+                }
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|argument| argument == "--unregister-login-item") {
@@ -2105,6 +2303,7 @@ pub fn run() {
                             last_focus = s.focused_session_id.clone();
                             saw_snapshot = true;
                             *snap_for_loop.lock().await = Some(s.clone());
+                            sync_controller_menu(&handle, &s);
                             let _ = handle.emit("bus-snapshot", &s);
                         }
                         ServerMessage::Event { event } => {
@@ -2154,7 +2353,11 @@ pub fn run() {
                                     last_focus = s.focused_session_id.clone();
                                 }
                                 let payload = s.clone();
-                                let _ = handle.emit("bus-snapshot", payload);
+                                let _ = handle.emit("bus-snapshot", &payload);
+                                // Sessions appearing/disappearing and focus moving
+                                // both change whether the lock is being honored, so
+                                // resync here rather than only on ConfigChanged.
+                                sync_controller_menu(&handle, &payload);
                                 drop(guard);
                                 if changed && last_focus.is_some() {
                                     show_hud(&handle, Arc::clone(&hud_gen_loop));
@@ -2188,7 +2391,8 @@ pub fn run() {
                             if let Some(s) = guard.as_mut() {
                                 s.config = config;
                                 let payload = s.clone();
-                                let _ = handle.emit("bus-snapshot", payload);
+                                let _ = handle.emit("bus-snapshot", &payload);
+                                sync_controller_menu(&handle, &payload);
                             }
                         }
                         _ => {}
@@ -2221,6 +2425,53 @@ pub fn run() {
                 false,
                 None::<&str>,
             )?;
+            // "Controlled by" pins one IDE to the deck. Ordered from the shared
+            // IDE registry rather than the Settings integration list, which is
+            // adapter-scoped and would list Cursor twice (`cursor`, `cursor_acp`).
+            let controller_status = MenuItem::with_id(
+                app,
+                "controller:status",
+                "Waiting for microbridged…",
+                false,
+                None::<&str>,
+            )?;
+            let controller_auto = CheckMenuItem::with_id(
+                app,
+                CONTROLLER_AUTO,
+                "Automatic (follow frontmost app)",
+                true,
+                true,
+                None::<&str>,
+            )?;
+            let mut controller_ides = Vec::with_capacity(mb_protocol::IDES.len());
+            for ide in mb_protocol::IDES {
+                controller_ides.push((
+                    ide.family,
+                    CheckMenuItem::with_id(
+                        app,
+                        format!("{CONTROLLER_PREFIX}{}", ide.family),
+                        ide.label,
+                        true,
+                        false,
+                        None::<&str>,
+                    )?,
+                ));
+            }
+            let controller_submenu = {
+                let separator_one = PredefinedMenuItem::separator(app)?;
+                let separator_two = PredefinedMenuItem::separator(app)?;
+                let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+                    &controller_status,
+                    &separator_one,
+                    &controller_auto,
+                    &separator_two,
+                ];
+                for (_, item) in &controller_ides {
+                    items.push(item);
+                }
+                Submenu::with_items(app, "Controlled by", true, &items)?
+            };
+
             let check_updates_item = MenuItem::with_id(
                 app,
                 "check-updates",
@@ -2235,7 +2486,9 @@ pub fn run() {
             let tray_menu = Menu::with_items(
                 app,
                 &[
+                    // Device state first, then what controls it, then utilities.
                     &hardware_item,
+                    &controller_submenu,
                     &PredefinedMenuItem::separator(app)?,
                     &check_updates_item,
                     &settings_item,
@@ -2246,10 +2499,16 @@ pub fn run() {
             let context_menu = tray_menu.clone();
             let hardware_item_for_tray = hardware_item.clone();
 
+            app.manage(ControllerMenu {
+                status: controller_status,
+                auto: controller_auto,
+                ides: controller_ides,
+            });
+
             let blur_hide: BlurHideClock = Arc::new(std::sync::Mutex::new(None));
             let blur_hide_tray = Arc::clone(&blur_hide);
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(tray_icon)
                 .icon_as_template(true)
                 .tooltip("Microbridge")
@@ -2267,7 +2526,15 @@ pub fn run() {
                     "check-updates" => trigger_update_check(app),
                     "settings" => show_settings_window(app),
                     "quit" => app.exit(0),
-                    _ => {}
+                    CONTROLLER_AUTO => choose_controller(app, None),
+                    id => {
+                        if let Some(family) = id.strip_prefix(CONTROLLER_PREFIX) {
+                            // "controller:status" is disabled and never fires.
+                            if mb_protocol::ide::is_known_family(family) {
+                                choose_controller(app, Some(family.to_string()));
+                            }
+                        }
+                    }
                 })
                 .on_tray_icon_event(move |tray, event| match event {
                     TrayIconEvent::Click {

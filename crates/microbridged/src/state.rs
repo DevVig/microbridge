@@ -9,12 +9,13 @@ use mb_adapters::{ObservedSession, SessionContext};
 use mb_device::{parse_rgb_hex, Device, LedFrame};
 use mb_protocol::{
     Action, AdapterCapabilities, AdapterConnectionState, AdapterKind, AdapterStatus, AgentKeyLed,
-    AgentKeyLedFrame, AgentState, BusEvent, DaemonConfig, ServerMessage, SessionStatus, Snapshot,
-    AGENT_KEY_COUNT,
+    AgentKeyLedFrame, AgentState, BusEvent, DaemonConfig, DialRole, IdeProfile, JoystickRole,
+    ServerMessage, SessionStatus, Snapshot, AGENT_KEY_COUNT,
 };
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
+use crate::app_match::app_family;
 use crate::config::save_config;
 use crate::registry::Registry;
 
@@ -606,17 +607,26 @@ impl DaemonState {
     }
 
     /// Update the ephemeral frontmost app (not written to disk).
+    ///
+    /// Still recorded while an IDE is pinned — Settings displays it — but the
+    /// focus re-resolve is skipped, so alt-tabbing costs nothing and cannot move
+    /// the deck.
     pub fn set_frontmost_app(&mut self, app: Option<String>) {
         if self.config.frontmost_app == app {
             return;
         }
         let prev_focus = self.registry.focused.clone();
         self.config.frontmost_app = app;
-        self.registry.resolve_focus(&self.config);
+        let pinned = self.registry.active_controller(&self.config).is_some();
+        if !pinned {
+            self.registry.resolve_focus(&self.config);
+        }
         self.broadcast_ui(BusEvent::ConfigChanged {
             config: Box::new(self.config.clone()),
         });
-        self.after_bus_change(prev_focus);
+        if !pinned {
+            self.after_bus_change(prev_focus);
+        }
     }
 
     fn after_bus_change(&mut self, prev_focus: Option<String>) {
@@ -766,7 +776,29 @@ impl DaemonState {
         }
     }
 
+    /// Input behavior for whichever IDE currently owns the deck.
+    ///
+    /// Keyed on the focused session's family rather than `config.controlling_ide`
+    /// so per-IDE behavior also applies in Automatic mode. Pinning a controller
+    /// is what makes *which* profile you get predictable, which is the whole
+    /// reason the profiles are safe to diverge at all.
+    fn active_profile(&self) -> &'static IdeProfile {
+        self.registry
+            .focused_session()
+            .map(|session| mb_protocol::ide::profile_for_family(&app_family(&session.app)))
+            .unwrap_or(&mb_protocol::ide::DEFAULT_PROFILE)
+    }
+
     pub fn handle_device_input(&mut self, input: mb_device::DeviceInput) {
+        let profile = self.active_profile();
+        self.handle_device_input_with_profile(input, profile);
+    }
+
+    fn handle_device_input_with_profile(
+        &mut self,
+        input: mb_device::DeviceInput,
+        profile: &IdeProfile,
+    ) {
         use mb_device::{DeviceInput, JoystickDir};
         match input {
             DeviceInput::AgentKeyPress { index } => {
@@ -794,17 +826,28 @@ impl DaemonState {
             DeviceInput::Interrupt => self.handle_device_action(Action::Interrupt),
             DeviceInput::NewSession => self.handle_device_action(Action::NewSession),
             DeviceInput::CycleFocus | DeviceInput::TouchTap => self.move_focus(1),
-            DeviceInput::DialRotate { delta } if delta < 0 => {
-                self.handle_device_action(Action::ReasoningEffortDown)
-            }
-            DeviceInput::DialRotate { delta } if delta > 0 => {
-                self.handle_device_action(Action::ReasoningEffortUp)
+            DeviceInput::DialRotate { delta } if delta != 0 => {
+                let backward = delta < 0;
+                self.handle_device_action(match (profile.dial, backward) {
+                    (DialRole::Effort, true) => Action::ReasoningEffortDown,
+                    (DialRole::Effort, false) => Action::ReasoningEffortUp,
+                    (DialRole::Navigate, true) => Action::NavigateUp,
+                    (DialRole::Navigate, false) => Action::NavigateDown,
+                })
             }
             DeviceInput::DialRotate { .. } => {}
-            DeviceInput::DialPress => self.handle_device_action(Action::OpenFocusedThread),
-            DeviceInput::JoystickFlick { direction } => match direction {
-                JoystickDir::Up | JoystickDir::Left => self.move_focus(-1),
-                JoystickDir::Down | JoystickDir::Right => self.move_focus(1),
+            DeviceInput::DialPress => self.handle_device_action(profile.dial_press),
+            DeviceInput::JoystickFlick { direction } => match profile.joystick {
+                JoystickRole::DeckCycle => match direction {
+                    JoystickDir::Up | JoystickDir::Left => self.move_focus(-1),
+                    JoystickDir::Down | JoystickDir::Right => self.move_focus(1),
+                },
+                JoystickRole::Navigate => self.handle_device_action(match direction {
+                    JoystickDir::Up => Action::NavigateUp,
+                    JoystickDir::Down => Action::NavigateDown,
+                    JoystickDir::Left => Action::NavigateLeft,
+                    JoystickDir::Right => Action::NavigateRight,
+                }),
             },
         }
     }
@@ -899,7 +942,9 @@ impl DaemonState {
     }
 
     fn move_focus(&mut self, offset: isize) {
-        let sessions = self.registry.session_list();
+        // Controller-scoped: cycling through every session would walk the deck
+        // straight off the pinned IDE on the first joystick flick.
+        let sessions = self.registry.selectable_sessions(&self.config);
         if sessions.is_empty() {
             return;
         }
@@ -1136,6 +1181,23 @@ mod tests {
 
     fn state() -> DaemonState {
         DaemonState::new(Box::<MockDevice>::default(), DaemonConfig::default())
+    }
+
+    /// The IDE registry names the adapters that can feed each family, and the
+    /// tray greys out a family whose providers are all disabled. A typo there
+    /// would silently make an IDE unpickable, so pin the two tables together.
+    #[test]
+    fn every_ide_provider_is_a_real_adapter() {
+        let adapters = initial_adapter_statuses(&DaemonConfig::default());
+        for ide in mb_protocol::IDES {
+            for provider in ide.providers {
+                assert!(
+                    adapters.contains_key(*provider),
+                    "{} lists unknown provider {provider}",
+                    ide.family
+                );
+            }
+        }
     }
 
     #[test]
@@ -1390,6 +1452,163 @@ mod tests {
             .route_action("cursor:one", Action::Approve)
             .unwrap_err();
         assert!(error.contains("does not support"));
+    }
+
+    /// Navigation used to be reported as universally supported, so it would
+    /// pass the capability gate and then be dropped by an adapter that cannot
+    /// act on it — the silent success this daemon refuses everywhere else.
+    #[test]
+    fn navigation_requires_an_advertised_capability() {
+        let mut state = state();
+        state.config.adapters.get_mut("cursor").unwrap().enabled = true;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        state
+            .register_adapter(
+                42,
+                "cursor".into(),
+                Some("test".into()),
+                AdapterCapabilities::lifecycle_only(),
+                tx,
+            )
+            .unwrap();
+        state.upsert_session(session("cursor:one", AgentState::Working), 42);
+        let error = state
+            .route_action("cursor:one", Action::NavigateUp)
+            .unwrap_err();
+        assert!(error.contains("does not support"), "got: {error}");
+    }
+
+    #[test]
+    fn navigation_is_delivered_when_advertised() {
+        let mut state = state();
+        state.config.adapters.get_mut("cursor").unwrap().enabled = true;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state
+            .register_adapter(
+                42,
+                "cursor".into(),
+                Some("test".into()),
+                AdapterCapabilities {
+                    navigation: true,
+                    ..AdapterCapabilities::lifecycle_only()
+                },
+                tx,
+            )
+            .unwrap();
+        state.upsert_session(session("cursor:one", AgentState::Working), 42);
+        state
+            .route_action("cursor:one", Action::NavigateLeft)
+            .unwrap();
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::Action {
+                action: Action::NavigateLeft,
+                ..
+            })
+        ));
+    }
+
+    /// The profile seam must be a no-op for every IDE that has no explicit
+    /// profile — the dial keeps stepping reasoning effort and the joystick keeps
+    /// cycling the deck locally.
+    #[test]
+    fn default_profile_preserves_the_historical_input_map() {
+        use mb_device::{DeviceInput, JoystickDir};
+
+        let mut state = state();
+        state.config.adapters.get_mut("cursor").unwrap().enabled = true;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state
+            .register_adapter(
+                42,
+                "cursor".into(),
+                Some("test".into()),
+                AdapterCapabilities::full_control(),
+                tx,
+            )
+            .unwrap();
+        state.upsert_session(session("cursor:one", AgentState::Working), 42);
+        state.upsert_session(session("cursor:two", AgentState::Working), 42);
+
+        state.handle_device_input(DeviceInput::DialRotate { delta: 1 });
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::Action {
+                action: Action::ReasoningEffortUp,
+                ..
+            })
+        ));
+        state.handle_device_input(DeviceInput::DialRotate { delta: -1 });
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::Action {
+                action: Action::ReasoningEffortDown,
+                ..
+            })
+        ));
+
+        // Joystick stays deck-local: it moves focus, it does not reach the adapter.
+        let before = state.registry.focused.clone();
+        state.handle_device_input(DeviceInput::JoystickFlick {
+            direction: JoystickDir::Down,
+        });
+        assert_ne!(state.registry.focused, before);
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// Exercises the `Navigate` roles end to end so the plumbing is known-good
+    /// before any IDE opts into it.
+    #[test]
+    fn navigate_profile_sends_navigation_instead_of_cycling() {
+        use mb_device::{DeviceInput, JoystickDir};
+        use mb_protocol::ide::{DialRole, IdeProfile, JoystickRole};
+
+        const NAV: IdeProfile = IdeProfile {
+            dial: DialRole::Navigate,
+            joystick: JoystickRole::Navigate,
+            dial_press: Action::OpenFocusedThread,
+        };
+
+        let mut state = state();
+        state.config.adapters.get_mut("cursor").unwrap().enabled = true;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state
+            .register_adapter(
+                42,
+                "cursor".into(),
+                Some("test".into()),
+                AdapterCapabilities::full_control(),
+                tx,
+            )
+            .unwrap();
+        state.upsert_session(session("cursor:one", AgentState::Working), 42);
+        state.upsert_session(session("cursor:two", AgentState::Working), 42);
+
+        let focused_before = state.registry.focused.clone();
+        state.handle_device_input_with_profile(
+            DeviceInput::JoystickFlick {
+                direction: JoystickDir::Right,
+            },
+            &NAV,
+        );
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::Action {
+                action: Action::NavigateRight,
+                ..
+            })
+        ));
+        // Navigation goes to the IDE; the deck selection stays put.
+        assert_eq!(state.registry.focused, focused_before);
+
+        state.handle_device_input_with_profile(DeviceInput::DialRotate { delta: -1 }, &NAV);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::Action {
+                action: Action::NavigateUp,
+                ..
+            })
+        ));
     }
 
     #[test]

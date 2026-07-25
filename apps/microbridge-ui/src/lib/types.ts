@@ -12,6 +12,7 @@ export interface SessionStatus {
   title: string;
   state: AgentState;
   updated_at_ms: number;
+  focus_uri?: string | null;
 }
 
 export type KeySource =
@@ -42,6 +43,7 @@ export type AdapterConnectionState =
   | "incompatible"
   | "error";
 
+/** Mirrors `AdapterCapabilities` in mb-protocol; keep both in step. */
 export interface AdapterCapabilities {
   lifecycle_observation: boolean;
   approval_acceptance: boolean;
@@ -50,6 +52,12 @@ export interface AdapterCapabilities {
   new_session: boolean;
   focus_open: boolean;
   reasoning_effort: boolean;
+  // Added after this mirror was first written. Optional because older daemons
+  // omit them and every field is `#[serde(default)]` on the Rust side.
+  tty_control?: boolean;
+  mcp_native?: boolean;
+  uri_focus?: boolean;
+  navigation?: boolean;
 }
 
 export interface AdapterStatus {
@@ -69,6 +77,8 @@ export interface DaemonConfig {
   app_priority: string[];
   custom_key_ids: string[];
   pinned_focus: string | null;
+  /** IDE family pinned to the deck from the tray; null = follow frontmost. */
+  controlling_ide: string | null;
   approvals_interrupt: boolean;
   pause_leds: boolean;
   appearance: Appearance;

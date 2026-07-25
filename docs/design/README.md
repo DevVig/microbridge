@@ -91,6 +91,16 @@ custom assignment. Agent Keys follow one IDE at a time by default; switch
 to most recent for a cross-app monitoring surface. Command keys always
 route to the single daemon-resolved focused thread.
 
+Which IDE that is can also be **pinned** rather than inferred, from the tray's
+`Controlled by` submenu. Left on *Automatic* the deck follows the frontmost app
+as it always has; pinned, it stays on that IDE until you change it — alt-tabbing
+and approvals elsewhere no longer move it. Because hosts and harnesses are
+many-to-many (a T3 Code thread can arrive over T3's paired contract or through
+the Codex or Claude journals), the pin is on the IDE family and collects every
+harness feeding it. A pin whose IDE has no live threads yields to the normal
+policy rather than leaving the deck dark, and the tray says so. Pinning is also
+what makes per-IDE input behavior predictable enough to diverge at all.
+
 The on-screen **device twin** is a photo-accurate vector rendering of the
 actual hardware — white plate (white in both themes), frosted agent caps with
 the switch stem visible through the frost, printed command icons, dial,
