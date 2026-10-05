@@ -37,6 +37,7 @@ class EvidenceTests(unittest.TestCase):
                        'sensitive':False, 'sensitive_reason':'', 'coderabbit_state':'error',
                        'fallback_reason':'Existing CLI cannot authenticate', 'fallback_evidence':review.evidence(self.fallback)}
         self.report = {'status':'completed', 'base_sha':self.base, 'candidate_sha':self.head, 'summary':'Reviewed',
+                       'reviewer':'independent-codex', 'review_context':'fresh-review-session',
                        'covered_paths':['README.md'], 'limitations':[], 'findings':[]}
         self.receipt = {'schema_version':1, 'provider':'codex', 'status':'completed', 'reviewer':'independent-codex',
                         'review_context':'fresh-review-session', 'base_sha':self.base, 'candidate_sha':self.head,
@@ -137,8 +138,9 @@ class EvidenceTests(unittest.TestCase):
         other = copy.deepcopy(self.receipt)
         other.update(provider='human',reviewer='independent-human',review_context='additional-context')
         with self.assertRaises(ValueError):self.check([self.receipt,other])
+        # Identical conclusions are valid when the retained provenance differs.
         independent_report = copy.deepcopy(self.report)
-        independent_report['summary'] = 'Additional independently completed review'
+        independent_report.update(reviewer=other['reviewer'],review_context=other['review_context'])
         other_path = self.root/'additional-review.json'
         other_path.write_text(json.dumps(independent_report))
         other['report'] = review.evidence(other_path)
@@ -155,7 +157,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_bugbot_requires_existing_authorization_evidence(self):
         other = copy.deepcopy(self.receipt)
-        other.update(provider='bugbot',reviewer='bugbot',review_context='existing-bugbot-run')
+        other.update(provider='bugbot')
         with self.assertRaises(KeyError):self.check([other])
 
     def test_fallback_requires_unchanged_error_evidence(self):
@@ -197,6 +199,13 @@ class EvidenceTests(unittest.TestCase):
         self.save_report()
         self.receipt['findings'][0].update(kind='suggestion',description=finding['description'])
         self.check()
+
+    def test_report_cannot_be_relabelled_to_another_reviewer_or_context(self):
+        for field in ['reviewer','review_context']:
+            original = self.receipt[field]
+            self.receipt[field] = 'different-identity'
+            with self.assertRaises(ValueError):self.check()
+            self.receipt[field] = original
 
     def test_codex_never_creates_completed_receipt_for_invalid_report(self):
         packet_path = self.root/'packet.json'

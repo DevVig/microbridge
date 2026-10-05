@@ -5,6 +5,8 @@
     "status": {"type": "string", "enum": ["completed"]},
     "base_sha": {"type": "string"},
     "candidate_sha": {"type": "string"},
+    "reviewer": {"type": "string"},
+    "review_context": {"type": "string"},
     "summary": {"type": "string"},
     "covered_paths": {"type": "array", "items": {"type": "string"}},
     "limitations": {"type": "array", "items": {"type": "string"}},
@@ -25,5 +27,5 @@
       }
     }
   },
-  "required": ["status", "base_sha", "candidate_sha", "summary", "covered_paths", "limitations", "findings"]
+  "required": ["status", "base_sha", "candidate_sha", "reviewer", "review_context", "summary", "covered_paths", "limitations", "findings"]
 }
