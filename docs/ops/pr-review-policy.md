@@ -18,7 +18,7 @@ The reviewer must inspect the actual full diff, surrounding contracts, applicabl
 
 Billing, authentication/authorization, encryption/credentials, tenant isolation, schema/migrations and review controls require an additional independent review and targeted tests at the final candidate SHA. Include relevant negative tests for denied identities/roles, cross-tenant access, webhook/replay boundaries, encryption/key failures, migration compatibility and rollback as applicable. Use judgment to flag sensitive changes whose path names do not reveal the risk.
 
-Every actionable correctness, security, privacy, data-integrity, compatibility, accessibility or usability defect must be fixed and verified. Record every finding, severity, path/line, reasoning and disposition. Optional wording/style suggestions may be nonblocking with an evidence-backed reason accepted by the independent reviewer. Do not relabel a real defect as cosmetic. Resolve GitHub review conversations with evidence before merge. Record reviewer identity/context, implementation identity/context, timestamp, exact base/candidate SHA, path coverage, raw report and limitations.
+Every actionable correctness, security, privacy, data-integrity, compatibility, accessibility or usability defect must be fixed and verified. Record every finding, severity, classification (`defect` or `suggestion`), path/line, reasoning and disposition. Optional wording/style suggestions may be nonblocking with an evidence-backed reason accepted by the independent reviewer. Do not relabel a real defect as cosmetic. Resolve GitHub review conversations with evidence before merge. Record reviewer identity/context, implementation identity/context, timestamp, exact base/candidate SHA, path coverage, raw report and limitations.
 
 ## Local helper
 
@@ -46,11 +46,11 @@ python3 -B scripts/review/review.py validate \
   --receipt "$REVIEW_DIR/codex-review/receipt.json"
 ```
 
-The last command fails while findings remain open, coverage is incomplete, the SHA changed, the checkout is dirty, or evidence artifacts changed. For sensitive candidates, pass a second `--receipt` with a distinct independent review context and `--targeted-tests PATH.json`. The test evidence has `candidate_sha`, literal `status: "passed"`, a nonempty `tests` array listing commands/results, and `report` containing an actual local output `path` and its `sha256`.
+The last command fails while findings remain open, coverage is incomplete, the SHA changed, the checkout is dirty, or evidence artifacts changed. For sensitive candidates, pass a second `--receipt` with a distinct independent review context, its own independently produced report artifact, and `--targeted-tests PATH.json`. The test evidence has `candidate_sha`, literal `status: "passed"`, a nonempty `tests` array listing commands/results, and `report` containing an actual local output `path` and its `sha256`.
 
 For completed existing CodeRabbit, Bugbot or human reviews, retain the original result and normalize its final report to `report.schema.json`: literal `status: "completed"`, exact `base_sha`/`candidate_sha`, summary, every `covered_paths`, `limitations` and every finding. Do not normalize an upstream skipped/failed result into completion. Create a receipt using the same fields as the Codex receipt, with the actual provider, reviewer/context, completion timestamp and a hashed report artifact. Bugbot receipts additionally require `existing_authorization` evidence with `path`/`sha256`. The report and receipt must agree on status, scope and findings.
 
-Findings start with `disposition: "open"`. A disposition requires `rationale`, `verification` and `accepted_by` matching the independent reviewer. `nonblocking` is limited to low-severity suggestions; resolved defects still require verification. A receipt cannot drop/alter the original report's findings. Fixing code produces a new candidate and new review; preserve earlier artifacts rather than overwriting them.
+Findings start with `disposition: "open"`. A disposition requires `rationale`, `verification` and `accepted_by` matching the independent reviewer. Every report finding requires `kind: "defect"` or `kind: "suggestion"`; `nonblocking` is limited to low-severity optional suggestions; resolved defects still require verification. A receipt cannot drop/alter the original report's findings. Fixing code produces a new candidate and new review; preserve earlier artifacts rather than overwriting them.
 
 ```sh
 python3 -B -m unittest discover -s scripts/review -p 'test_*.py' -v

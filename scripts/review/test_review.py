@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('review', Path(__file__).with_name('review.py'))
 review = importlib.util.module_from_spec(spec)
@@ -104,12 +106,12 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.check()
 
     def test_report_findings_cannot_be_dropped(self):
-        self.report['findings'] = [{'id':'R1','path':'README.md','line':1,'severity':'high','description':'Defect'}]
+        self.report['findings'] = [{'id':'R1','path':'README.md','line':1,'severity':'high','kind':'defect','description':'Defect'}]
         self.save_report()
         with self.assertRaises(ValueError):self.check()
 
     def test_open_findings_and_unaccepted_dispositions_fail(self):
-        finding = {'id':'R1','path':'README.md','line':1,'severity':'high','description':'Defect'}
+        finding = {'id':'R1','path':'README.md','line':1,'severity':'high','kind':'defect','description':'Defect'}
         self.report['findings'] = [finding]
         self.receipt['findings'] = [finding | {'disposition':'open'}]
         self.save_report()
@@ -135,6 +137,11 @@ class EvidenceTests(unittest.TestCase):
         other = copy.deepcopy(self.receipt)
         other.update(provider='human',reviewer='independent-human',review_context='additional-context')
         with self.assertRaises(ValueError):self.check([self.receipt,other])
+        independent_report = copy.deepcopy(self.report)
+        independent_report['summary'] = 'Additional independently completed review'
+        other_path = self.root/'additional-review.json'
+        other_path.write_text(json.dumps(independent_report))
+        other['report'] = review.evidence(other_path)
         tests = {'candidate_sha':self.head,'status':'passed','tests':['targeted negative regression tests'],'report':review.evidence(self.fallback)}
         self.check([self.receipt,other],tests)
         other['review_context'] = self.receipt['review_context']
@@ -149,11 +156,63 @@ class EvidenceTests(unittest.TestCase):
     def test_bugbot_requires_existing_authorization_evidence(self):
         other = copy.deepcopy(self.receipt)
         other.update(provider='bugbot',reviewer='bugbot',review_context='existing-bugbot-run')
-        with self.assertRaises(KeyError):self.check([self.receipt,other])
+        with self.assertRaises(KeyError):self.check([other])
 
     def test_fallback_requires_unchanged_error_evidence(self):
         self.fallback.write_text('changed evidence\n')
         with self.assertRaises(ValueError):self.check()
+
+    def test_incomplete_or_malformed_imported_findings_fail(self):
+        complete = {'id':'R1','path':'README.md','line':1,'severity':'low','kind':'defect','description':'Defect'}
+        for broken in [{'id':'R1'},complete | {'line':True},complete | {'line':0},complete | {'severity':'cosmetic'},complete | {'kind':'unknown'}]:
+            with self.subTest(finding=broken):
+                self.report['findings'] = [broken]
+                self.receipt['findings'] = [broken | {'disposition':'resolved','rationale':'Fixed','verification':'Tests','accepted_by':'independent-codex'}]
+                self.save_report()
+                with self.assertRaises(ValueError):self.check()
+        self.report['findings'] = []
+        self.receipt['findings'] = []
+        del self.report['summary']
+        self.save_report()
+        with self.assertRaises(ValueError):self.check()
+
+    def test_same_report_cannot_be_reused_as_additional_review(self):
+        self.packet.update(sensitive=True,sensitive_reason='Manual risk classification')
+        other = copy.deepcopy(self.receipt)
+        other.update(provider='human',reviewer='independent-human',review_context='additional-context')
+        tests = {'candidate_sha':self.head,'status':'passed','tests':['targeted regression tests'],'report':review.evidence(self.fallback)}
+        with self.assertRaises(ValueError):self.check([self.receipt,other],tests)
+        copied = self.root/'copied-report.json'
+        copied.write_bytes(Path(other['report']['path']).read_bytes())
+        other['report'] = review.evidence(copied)
+        with self.assertRaises(ValueError):self.check([self.receipt,other],tests)
+
+    def test_low_actionable_defect_cannot_be_nonblocking(self):
+        finding = {'id':'R1','path':'README.md','line':1,'severity':'low','kind':'defect','description':'Actionable defect'}
+        self.report['findings'] = [finding]
+        self.receipt['findings'] = [finding | {'disposition':'nonblocking','rationale':'Optional','verification':'Checked','accepted_by':'independent-codex'}]
+        self.save_report()
+        with self.assertRaises(ValueError):self.check()
+        finding.update(kind='suggestion',description='Optional wording suggestion')
+        self.save_report()
+        self.receipt['findings'][0].update(kind='suggestion',description=finding['description'])
+        self.check()
+
+    def test_codex_never_creates_completed_receipt_for_invalid_report(self):
+        packet_path = self.root/'packet.json'
+        packet_path.write_text(json.dumps(self.packet))
+        actual_run = review.subprocess.run
+        for index, invalid in enumerate([self.report | {'status':s} for s in [False, True, 'skipped','rate_limited','failed']] + [self.report | {'candidate_sha':self.base},self.report | {'findings':[{'id':'R1'}]}]):
+            output = self.root/f'codex-{index}'
+            args = SimpleNamespace(repo=str(self.repo),packet=str(packet_path),reviewer='fresh-reviewer',review_context=f'context-{index}',output=str(output),timeout=10)
+            def fake_run(command, **kwargs):
+                if command[0] != 'codex':
+                    return actual_run(command, **kwargs)
+                (output/'report.json').write_text(json.dumps(invalid))
+                return SimpleNamespace(returncode=0)
+            with patch.object(review.shutil,'which',return_value='/existing/codex'),patch.object(review.subprocess,'run',side_effect=fake_run):
+                with self.assertRaises(ValueError):review.codex(args)
+            self.assertFalse((output/'receipt.json').exists())
 
 if __name__ == '__main__':
     unittest.main()

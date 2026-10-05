@@ -18,9 +18,10 @@
           "path": {"type": "string"},
           "line": {"type": "integer"},
           "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "kind": {"type": "string", "enum": ["defect", "suggestion"]},
           "description": {"type": "string"}
         },
-        "required": ["id", "path", "line", "severity", "description"]
+        "required": ["id", "path", "line", "severity", "kind", "description"]
       }
     }
   },
