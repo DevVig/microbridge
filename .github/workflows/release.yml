@@ -439,7 +439,7 @@ jobs:
         run: cp "$RUNNER_TEMP/candidate/microbridge.rb" Formula/microbridge.rb
       - name: Open PR
         id: formula-pr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(brew): bump formula to ${{ github.ref_name }}"
