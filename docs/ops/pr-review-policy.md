@@ -21,7 +21,7 @@ Record the fallback honestly as an independent review, never as `CodeRabbit: 0`.
 
 ### Automatic Codex fallback
 
-Jonathan approved this automation on October 5, 2026: request a Codex review automatically only when CodeRabbit cannot review a ready pull request. The workflow is `.github/workflows/coderabbit-fallback-review.yml` and the decision script is `.github/pr-review-fallback/pr-review-fallback.mjs`. Unit tests live at `scripts/pr-review-fallback.test.mjs` so `node --test` (which skips hidden `.github/` directories) actually runs them; CI invokes that file explicitly because this repository does not run a repo-root `node --test`. It is fallback-only and must not run on every pull request.
+Jonathan approved this automation on October 5, 2026: request a Codex review automatically only when CodeRabbit cannot review a ready pull request. The workflow is `.github/workflows/coderabbit-fallback-review.yml` and the decision script is `.github/pr-review-fallback/pr-review-fallback.mjs`. Unit tests live at `scripts/pr-review-fallback.test.mjs` so `node --test` (which skips hidden `.github/` directories) actually runs them; CI invokes that file explicitly because this repository does not run a repo-root `node --test`. It is fallback-only and must not run on every pull request. The workflow token is read-only plus checks/statuses read, and all writes use `CODEX_GITHUB_TOKEN`.
 
 Triggers:
 

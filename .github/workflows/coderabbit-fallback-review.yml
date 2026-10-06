@@ -35,8 +35,15 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
+  # Writes (comments, labels) go through CODEX_GITHUB_TOKEN, not GITHUB_TOKEN.
+  # Same-repo pull_request jobs check out PR code and omit the PAT,
+  # so GITHUB_TOKEN stays read-only.
+  pull-requests: read
+  issues: read
+  # loadPrEvidence reads CodeRabbit check-runs and commit statuses. Unlisted
+  # scopes are none, so without these the in-progress safeguard is silently empty.
+  checks: read
+  statuses: read
 
 env:
   FALLBACK_WINDOW_MINUTES: "45"
@@ -62,7 +69,7 @@ jobs:
       - name: Evaluate ready pull requests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CODEX_GITHUB_TOKEN: ${{ secrets.CODEX_GITHUB_TOKEN }}
+          CODEX_GITHUB_TOKEN: ${{ github.event_name != 'pull_request' && secrets.CODEX_GITHUB_TOKEN || '' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
