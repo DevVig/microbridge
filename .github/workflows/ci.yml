@@ -61,6 +61,7 @@ jobs:
         with:
           node-version: "22"
       - run: node --test adapters/cursor/hooks/microbridge-event.test.mjs
+      - run: node --test scripts/pr-review-fallback.test.mjs
       - run: node -e 'for (const file of ["adapters/cursor/.cursor-plugin/plugin.json", "adapters/cursor/hooks/hooks.json"]) JSON.parse(require("fs").readFileSync(file, "utf8"))'
 
   # Keep required-check names stable for the main branch ruleset.
