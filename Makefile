@@ -14,6 +14,7 @@ ci: fmt
 	$(MAKE) clippy
 	$(MAKE) test
 	node --test adapters/cursor/hooks/microbridge-event.test.mjs
+	node --test scripts/pr-review-fallback.test.mjs
 	cd apps/microbridge-ui && npm ci && npm test && npm run build
 
 build:

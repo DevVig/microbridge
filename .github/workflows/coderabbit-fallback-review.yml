@@ -1,0 +1,78 @@
+# Portable CodeRabbit → Codex fallback reviewer.
+# Copy this file and `.github/pr-review-fallback/` into other repos as-is.
+# Override the env defaults below if a repo needs a different window or cap.
+#
+# Fallback only: never requests Codex when CodeRabbit already reviewed, and
+# never triggers Cursor Bugbot. Requires repo secret CODEX_GITHUB_TOKEN
+# (PAT of the GitHub user connected to Codex) to mention `@codex review`.
+# GITHUB_TOKEN / github-actions[bot] mentions are not a reliable Codex trigger.
+# Missing CODEX_GITHUB_TOKEN: fail closed and quiet (warning + summary, exit 0).
+
+name: CodeRabbit fallback review
+
+on:
+  schedule:
+    # Stagger this minute when copying to other repos so they do not fire together.
+    - cron: "59 * * * *"
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List which PRs would get a fallback and why, without commenting
+        type: boolean
+        default: true
+      pr_number:
+        description: Optional pull request number to evaluate
+        type: string
+        required: false
+
+concurrency:
+  group: coderabbit-fallback-review
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  FALLBACK_WINDOW_MINUTES: "45"
+  FALLBACK_MAX_PRS_PER_RUN: "2"
+  FALLBACK_LABEL: review-fallback-coderabbit-unavailable
+  FALLBACK_CODEX_TRIGGER: "@codex review"
+
+jobs:
+  fallback:
+    name: Decide Codex fallback
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Evaluate ready pull requests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEX_GITHUB_TOKEN: ${{ secrets.CODEX_GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          FALLBACK_COMMENT_LOGIN: ${{ github.event.comment.user.login }}
+          FALLBACK_COMMENT_BODY: ${{ github.event.comment.body }}
+          # Pin one PR for issue_comment, workflow_dispatch(pr_number), and
+          # pull_request (the triggering PR). Schedule leaves this empty so the
+          # hourly sweep can drain the backlog.
+          FALLBACK_PR_NUMBER: ${{ inputs.pr_number || github.event.issue.number || github.event.pull_request.number }}
+          # pull_request runs are always dry-run so opening this workflow cannot
+          # comment on other PRs. schedule and issue_comment may post.
+          FALLBACK_DRY_RUN: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: node .github/pr-review-fallback/pr-review-fallback.mjs
