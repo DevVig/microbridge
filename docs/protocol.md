@@ -41,8 +41,9 @@ processes.
 
 `capabilities` is an object whose canonical boolean keys all default to
 `false`: `lifecycle_observation`, `approval_acceptance`,
-`approval_rejection`, `interrupt`, `new_session`, `focus_open`, and
-`reasoning_effort`. The action mapping is:
+`approval_rejection`, `interrupt`, `new_session`, `focus_open`,
+`reasoning_effort`, `tty_control`, `mcp_native`, `uri_focus`, and
+`navigation`. The action mapping is:
 
 | Action | Required capability |
 |---|---|
@@ -52,8 +53,14 @@ processes.
 | `new_session` | `new_session` |
 | `open_focused_thread` | `focus_open` |
 | `reasoning_effort_up`, `reasoning_effort_down` | `reasoning_effort` |
+| `navigate_up`, `navigate_down`, `navigate_left`, `navigate_right` | `navigation` |
 
-Focus navigation is daemon-local and does not require a host capability.
+`cycle_focus` moves the deck's own selection, so it is daemon-local and needs no
+host capability. The `navigate_*` actions are different: they drive the host's
+own navigation surface, so an adapter must advertise `navigation` to receive
+them. Advertise it only if you act on them — the daemon returns an explicit
+"does not support" rather than letting an unadvertised action be accepted and
+silently dropped.
 
 ## Messages: adapter → daemon
 
@@ -113,11 +120,18 @@ advertised the corresponding capability. Unknown actions remain a logged no-op.
 ```
 
 Config fields include `key_source` (`most_recent` · `focused_app` · `pinned` ·
-`priority` · `custom`), `pinned_focus`, `approvals_interrupt`, `pause_leds`,
-`appearance`, `lighting_preset`, `state_colors`, `brightness`,
-`sleep_minutes`, `frontmost_app`, `hardware_control_enabled`, adapter consent,
-and key-assignment lists. Persisted at
-`~/.microbridge/config.toml`.
+`priority` · `custom`), `pinned_focus`, `controlling_ide`,
+`approvals_interrupt`, `pause_leds`, `appearance`, `lighting_preset`,
+`state_colors`, `brightness`, `sleep_minutes`, `frontmost_app`,
+`hardware_control_enabled`, adapter consent, and key-assignment lists.
+Persisted at `~/.microbridge/config.toml`.
+
+`controlling_ide` is the IDE family key (`t3`, `cursor`, `claude_code`, … — see
+`mb_protocol::ide::IDES`) the user pinned to the deck from the menu bar; `null`
+means follow the frontmost app. An unrecognized value is cleared on load rather
+than honored, so a stale or hand-edited key cannot wedge the deck. Unlike
+`frontmost_app`, which is watcher-owned runtime state stripped before saving,
+this is a deliberate choice and persists across restarts.
 
 ### Adapter consent and pairing
 
@@ -184,6 +198,26 @@ with `{"type":"config_error","message":"…"}`.
 4. Otherwise the frontmost app's most recent session (via `frontmost_app`).
 5. Otherwise the most recently updated session.
 
+### Controller lock
+
+When `controlling_ide` is set **and that IDE has at least one live session**,
+every step above is restricted to sessions in that family, and step 4 is skipped
+entirely. Two consequences are intentional, not defects:
+
+- An `awaiting_approval` session in a *different* IDE no longer preempts.
+- `pinned_focus` is ignored while it points outside the controlling IDE.
+
+When the pinned IDE has **no** live sessions the lock yields and the unrestricted
+policy applies, so the deck stays useful instead of going dark; it reclaims the
+deck as soon as that IDE reports a session again. The menu bar app shows this
+fallback in the tray tooltip and in the "Controlled by" submenu, since a silent
+fallback would be indistinguishable from a broken lock.
+
+Because the lock is on the IDE *family*, it spans every harness feeding that IDE
+— a `t3` lock collects T3 threads arriving from the `t3code` control plane, the
+`codex` journal watcher (`originator: t3code…`) and the `claude` journal watcher
+(Agent SDK sessions under `~/.t3/`) alike.
+
 ## Key source (six Agent Keys)
 
 | Mode | Behavior |
@@ -193,6 +227,10 @@ with `{"type":"config_error","message":"…"}`.
 | `pinned` | First six `pinned_session_ids` |
 | `priority` | Approvals / active / app-priority ordering |
 | `custom` | Explicit `custom_key_ids` (empty string = unassigned) |
+
+A live `controlling_ide` scopes `focused_app` to the pinned family instead of the
+focused/frontmost app. The other modes are untouched: `pinned` and `custom` are
+explicit per-session intent, and `most_recent` is deliberately cross-app.
 
 Command keys always route to the single focused session.
 

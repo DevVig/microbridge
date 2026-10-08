@@ -2,18 +2,24 @@
 
 use mb_protocol::{AgentState, DaemonConfig, KeySource, SessionStatus, AGENT_KEY_COUNT};
 
-use crate::app_match::same_app;
+use crate::app_match::{app_family, same_app};
 
 /// Fill six Agent Key slots from the session bus + config.
+///
+/// `controller` is the pinned IDE family when one is set *and* live (see
+/// `Registry::active_controller`). It scopes `FocusedApp` only: `Pinned` and
+/// `Custom` are explicit per-session user intent, and `MostRecent` is
+/// deliberately cross-app as the monitoring surface.
 pub fn resolve_agent_keys(
     sessions: &[SessionStatus],
     focused_session_id: Option<&str>,
+    controller: Option<&str>,
     config: &DaemonConfig,
 ) -> [Option<String>; AGENT_KEY_COUNT] {
     let mut slots = [None, None, None, None, None, None];
     let ids = match config.key_source {
         KeySource::MostRecent => most_recent(sessions),
-        KeySource::FocusedApp => focused_app(sessions, focused_session_id, config),
+        KeySource::FocusedApp => focused_app(sessions, focused_session_id, controller, config),
         KeySource::Pinned => pinned(sessions, config),
         KeySource::Priority => priority(sessions, config),
         KeySource::Custom => custom(config),
@@ -33,8 +39,20 @@ fn most_recent(sessions: &[SessionStatus]) -> Vec<Option<String>> {
 fn focused_app(
     sessions: &[SessionStatus],
     focused_session_id: Option<&str>,
+    controller: Option<&str>,
     config: &DaemonConfig,
 ) -> Vec<Option<String>> {
+    // A pinned controller is the answer to "which IDE?" — it beats both the
+    // focused session and the frontmost app, which is the point of pinning.
+    if let Some(family) = controller {
+        let mut sorted: Vec<_> = sessions
+            .iter()
+            .filter(|s| app_family(&s.app) == family)
+            .collect();
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.updated_at_ms));
+        return pad(sorted.into_iter().map(|s| Some(s.id.clone())).collect());
+    }
+
     let app = focused_session_id
         .and_then(|id| sessions.iter().find(|s| s.id == id))
         .map(|s| s.app.as_str())
@@ -137,7 +155,7 @@ mod tests {
             key_source: KeySource::MostRecent,
             ..Default::default()
         };
-        let keys = resolve_agent_keys(&sessions, Some("a"), &config);
+        let keys = resolve_agent_keys(&sessions, Some("a"), None, &config);
         assert_eq!(keys[0].as_deref(), Some("b"));
         assert_eq!(keys[1].as_deref(), Some("c"));
         assert_eq!(keys[2].as_deref(), Some("a"));
@@ -153,7 +171,7 @@ mod tests {
         ];
         // Default key source is focused_app: IDE-scoped, newest first.
         let config = DaemonConfig::default();
-        let keys = resolve_agent_keys(&sessions, Some("c1"), &config);
+        let keys = resolve_agent_keys(&sessions, Some("c1"), None, &config);
         assert_eq!(keys[0].as_deref(), Some("c1"));
         assert_eq!(keys[1].as_deref(), Some("c2"));
         assert!(keys[2].is_none());
@@ -172,12 +190,12 @@ mod tests {
             ..Default::default()
         };
         // No focused session → frontmost Nightly still scopes to T3 Code threads.
-        let keys = resolve_agent_keys(&sessions, None, &config);
+        let keys = resolve_agent_keys(&sessions, None, None, &config);
         assert_eq!(keys[0].as_deref(), Some("t1"));
         assert_eq!(keys[1].as_deref(), Some("t2"));
         assert!(keys[2].is_none());
 
-        let cursor_focus = resolve_agent_keys(&sessions, Some("c1"), &config);
+        let cursor_focus = resolve_agent_keys(&sessions, Some("c1"), None, &config);
         assert_eq!(cursor_focus[0].as_deref(), Some("c1"));
         assert!(cursor_focus[1].is_none());
     }
@@ -193,10 +211,69 @@ mod tests {
             frontmost_app: Some("Claude".into()),
             ..Default::default()
         };
-        let keys = resolve_agent_keys(&sessions, None, &config);
+        let keys = resolve_agent_keys(&sessions, None, None, &config);
         assert_eq!(keys[0].as_deref(), Some("cl1"));
         assert_eq!(keys[1].as_deref(), Some("cl2"));
         assert!(keys[2].is_none());
+    }
+
+    #[test]
+    fn pinned_controller_beats_a_conflicting_frontmost_app() {
+        let sessions = vec![
+            session("t1", "T3 Code", AgentState::Working, 5),
+            session("t2", "T3 Code", AgentState::Idle, 4),
+            session("c1", "Cursor", AgentState::Working, 9),
+        ];
+        let config = DaemonConfig {
+            frontmost_app: Some("Cursor".into()),
+            controlling_ide: Some("t3".into()),
+            ..Default::default()
+        };
+        // Frontmost says Cursor and the focused session is Cursor; the lock wins.
+        let keys = resolve_agent_keys(&sessions, Some("c1"), Some("t3"), &config);
+        assert_eq!(keys[0].as_deref(), Some("t1"));
+        assert_eq!(keys[1].as_deref(), Some("t2"));
+        assert!(keys[2].is_none());
+    }
+
+    /// The many-to-many case the whole feature exists for: one IDE, three
+    /// harnesses. Locking "t3" must collect the T3 control plane's thread, the
+    /// Codex journal thread T3 spawned, and the Agent SDK thread under `~/.t3`.
+    #[test]
+    fn pinned_controller_spans_every_harness_feeding_that_ide() {
+        let sessions = vec![
+            session("t3code:paired", "T3 Code", AgentState::Working, 9),
+            session("codex:originator", "T3 Code", AgentState::Working, 8),
+            session("claude:sdk", "T3 Code", AgentState::Idle, 7),
+            session("codex:cli", "Codex CLI", AgentState::Working, 10),
+        ];
+        let config = DaemonConfig {
+            controlling_ide: Some("t3".into()),
+            ..Default::default()
+        };
+        let keys = resolve_agent_keys(&sessions, None, Some("t3"), &config);
+        assert_eq!(keys[0].as_deref(), Some("t3code:paired"));
+        assert_eq!(keys[1].as_deref(), Some("codex:originator"));
+        assert_eq!(keys[2].as_deref(), Some("claude:sdk"));
+        // The bare Codex CLI thread is a different IDE and stays off the deck.
+        assert!(keys[3].is_none());
+    }
+
+    #[test]
+    fn pinned_controller_does_not_touch_cross_app_key_sources() {
+        let sessions = vec![
+            session("t1", "T3 Code", AgentState::Working, 1),
+            session("c1", "Cursor", AgentState::Working, 2),
+        ];
+        // MostRecent is the deliberate cross-app monitoring surface.
+        let config = DaemonConfig {
+            key_source: KeySource::MostRecent,
+            controlling_ide: Some("t3".into()),
+            ..Default::default()
+        };
+        let keys = resolve_agent_keys(&sessions, None, Some("t3"), &config);
+        assert_eq!(keys[0].as_deref(), Some("c1"));
+        assert_eq!(keys[1].as_deref(), Some("t1"));
     }
 
     #[test]
@@ -214,7 +291,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let keys = resolve_agent_keys(&sessions, None, &config);
+        let keys = resolve_agent_keys(&sessions, None, None, &config);
         assert!(keys[0].is_none());
         assert_eq!(keys[1].as_deref(), Some("a"));
     }

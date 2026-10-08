@@ -8,6 +8,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod ide;
+
+pub use ide::{DialRole, Ide, IdeProfile, JoystickRole, IDES};
+
 /// Protocol revision. Bumped on breaking changes; clients announce theirs in
 /// [`ClientMessage::Hello`].
 pub const PROTOCOL_VERSION: u32 = 0;
@@ -230,6 +234,11 @@ pub struct AdapterCapabilities {
     pub mcp_native: bool,
     #[serde(default)]
     pub uri_focus: bool,
+    /// Can act on [`Action::NavigateUp`] and friends — i.e. the host exposes a
+    /// navigation surface Microbridge may drive. Defaults false, so an adapter
+    /// that predates the field is never sent navigation it would drop.
+    #[serde(default)]
+    pub navigation: bool,
 }
 
 impl AdapterCapabilities {
@@ -252,6 +261,7 @@ impl AdapterCapabilities {
             tty_control: true,
             mcp_native: true,
             uri_focus: true,
+            navigation: true,
         }
     }
 
@@ -263,11 +273,16 @@ impl AdapterCapabilities {
             Action::NewSession => self.new_session,
             Action::OpenFocusedThread => self.focus_open,
             Action::ReasoningEffortUp | Action::ReasoningEffortDown => self.reasoning_effort,
-            Action::CycleFocus
-            | Action::NavigateUp
+            // Navigation has to be advertised like every other lever. It used
+            // to return `true` unconditionally, which was harmless only while
+            // nothing emitted it — now that a profile can, an unadvertised
+            // adapter would accept the action and silently drop it.
+            Action::NavigateUp
             | Action::NavigateDown
             | Action::NavigateLeft
-            | Action::NavigateRight => true,
+            | Action::NavigateRight => self.navigation,
+            // Deck-local: resolved by the daemon, never sent to an adapter.
+            Action::CycleFocus => true,
         }
     }
 }
@@ -323,6 +338,14 @@ pub struct DaemonConfig {
     /// When set, this session owns the deck until cleared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_focus: Option<String>,
+    /// Family key (see [`ide::IDES`]) of the IDE the user pinned to the deck
+    /// from the menu bar. `None` means follow the frontmost app, which is the
+    /// historical behavior.
+    ///
+    /// Unlike [`Self::frontmost_app`] this is a deliberate choice, so it is
+    /// persisted and survives restarts until the user changes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controlling_ide: Option<String>,
     /// Approvals preempt focus (default true).
     #[serde(default = "default_true")]
     pub approvals_interrupt: bool,
@@ -370,6 +393,7 @@ impl Default for DaemonConfig {
             app_priority: Vec::new(),
             custom_key_ids: vec![String::new(); AGENT_KEY_COUNT],
             pinned_focus: None,
+            controlling_ide: None,
             approvals_interrupt: true,
             pause_leds: false,
             appearance: Appearance::System,
@@ -393,6 +417,15 @@ impl DaemonConfig {
         self.brightness = self.brightness.min(100);
         if let Some(colors) = self.lighting_preset.colors() {
             self.state_colors = colors;
+        }
+        // A hand-edited or stale family key would match no session and wedge
+        // the deck. Drop it and fall back to following the frontmost app.
+        if self
+            .controlling_ide
+            .as_deref()
+            .is_some_and(|family| !ide::is_known_family(family))
+        {
+            self.controlling_ide = None;
         }
     }
 }
@@ -562,6 +595,47 @@ mod tests {
         assert!(json.contains(r#""type":"status""#));
         assert!(json.contains(r#""state":"awaiting_approval""#));
         assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), msg);
+    }
+
+    #[test]
+    fn normalize_clears_an_unknown_controlling_ide() {
+        // A stale or hand-edited family would match no session, leaving the deck
+        // pinned to nothing. Falling back to Automatic is the safe reading.
+        let mut config = DaemonConfig {
+            controlling_ide: Some("nonsense".into()),
+            ..Default::default()
+        };
+        config.normalize();
+        assert_eq!(config.controlling_ide, None);
+
+        let mut valid = DaemonConfig {
+            controlling_ide: Some("t3".into()),
+            ..Default::default()
+        };
+        valid.normalize();
+        assert_eq!(valid.controlling_ide.as_deref(), Some("t3"));
+    }
+
+    #[test]
+    fn controlling_ide_is_omitted_from_config_when_unset() {
+        let json = serde_json::to_string(&DaemonConfig::default()).unwrap();
+        assert!(!json.contains("controlling_ide"), "{json}");
+    }
+
+    #[test]
+    fn navigation_is_not_supported_unless_advertised() {
+        let lifecycle = AdapterCapabilities::lifecycle_only();
+        for action in [
+            Action::NavigateUp,
+            Action::NavigateDown,
+            Action::NavigateLeft,
+            Action::NavigateRight,
+        ] {
+            assert!(!lifecycle.supports(action), "{action:?}");
+            assert!(AdapterCapabilities::full_control().supports(action));
+        }
+        // Deck-local, resolved by the daemon — never gated on an adapter.
+        assert!(lifecycle.supports(Action::CycleFocus));
     }
 
     #[test]
