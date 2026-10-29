@@ -13,12 +13,46 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      macos: ${{ steps.filter.outputs.macos }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        name: Detect Rust, Tauri, or macOS-relevant path changes
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Running macOS rust (${{ github.event_name }} to ${{ github.ref_name }})"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.sha }}"
+          echo "Changed files vs ${base}:"
+          git diff --name-only "${base}...${head}"
+          # rust workspace, toolchain, Tauri native project, and this workflow.
+          if git diff --name-only "${base}...${head}" | grep -E -q \
+            '^(Cargo\.(toml|lock)|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml|crates/|apps/microbridge-ui/src-tauri/|\.github/workflows/ci\.yml|\.cargo/)'; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Running macOS rust: Rust, Tauri, or macOS-relevant paths changed"
+          else
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping macOS rust: no Rust, Tauri, or macOS-relevant path changes"
+          fi
+
   rust:
     name: rust (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -34,6 +68,35 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  # Required check name is rust (macos-latest). Do not skip this job: a skipped
+  # required check blocks merge. Run the real macOS work only when changes.macos
+  # is true (push to main, or a PR that touches Rust/Tauri/macOS-relevant paths);
+  # otherwise report success from ubuntu-latest.
+  rust-macos:
+    name: rust (macos-latest)
+    needs: changes
+    runs-on: ${{ needs.changes.outputs.macos == 'true' && 'macos-latest' || 'ubuntu-latest' }}
+    steps:
+      - name: Skip macOS rust (no relevant path changes)
+        if: needs.changes.outputs.macos != 'true'
+        run: echo "Skipping macOS rust checks; no Rust, Tauri, or macOS-relevant path changes."
+      - uses: actions/checkout@v7
+        if: needs.changes.outputs.macos == 'true'
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.macos == 'true'
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.macos == 'true'
+      - if: needs.changes.outputs.macos == 'true'
+        run: cargo fmt --all --check
+      - if: needs.changes.outputs.macos == 'true'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - if: needs.changes.outputs.macos == 'true'
+        run: cargo test --workspace
 
   ui:
     name: ui
