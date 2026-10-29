@@ -15,7 +15,7 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
       startsWith(github.event.pull_request.head.ref, 'chore/brew-v')
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -123,7 +123,7 @@ jobs:
   promote:
     name: promote verified release
     needs: [resolve, public-install]
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     permissions:
       contents: write
     steps:

@@ -21,7 +21,7 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-latest
             target: x86_64-apple-darwin
-          - os: ubuntu-latest
+          - os: namespace-profile-vig
             target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v7
@@ -243,7 +243,7 @@ jobs:
   assemble-assets:
     name: assemble release assets
     needs: [build, build-ui-macos]
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -335,7 +335,7 @@ jobs:
   publish:
     name: publish prerelease assets
     needs: [assemble-assets, formula-smoke-prepublish]
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -385,7 +385,7 @@ jobs:
   prepare-formula:
     name: prepare Homebrew formula
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: actions/checkout@v7
         with:
@@ -426,7 +426,7 @@ jobs:
   bump-formula:
     name: open Homebrew formula PR
     needs: [publish, formula-smoke-public-assets]
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: actions/checkout@v7
         with:
