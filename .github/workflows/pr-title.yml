@@ -13,7 +13,7 @@ permissions:
 jobs:
   lint:
     name: conventional title
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: amannn/action-semantic-pull-request@v5
         env:

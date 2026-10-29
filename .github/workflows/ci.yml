@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [namespace-profile-vig, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -33,7 +33,7 @@ jobs:
 
   ui:
     name: ui
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     defaults:
       run:
         working-directory: apps/microbridge-ui
@@ -52,7 +52,7 @@ jobs:
 
   adapters:
     name: adapters
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-vig
     steps:
       - uses: actions/checkout@v7
         with:
