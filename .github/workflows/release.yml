@@ -47,6 +47,7 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: ${{ env.ASSET }}
+          retention-days: 7
 
   build-ui-macos:
     name: build menu bar app (${{ matrix.target }})
@@ -239,6 +240,7 @@ jobs:
         with:
           name: ui-${{ matrix.target }}
           path: ui-out/*
+          retention-days: 7
 
   assemble-assets:
     name: assemble release assets
@@ -304,6 +306,7 @@ jobs:
         with:
           name: release-assets-${{ github.ref_name }}
           path: release-assets/*
+          retention-days: 7
 
   formula-smoke-prepublish:
     name: pre-publish formula smoke (${{ matrix.arch }})
@@ -401,6 +404,7 @@ jobs:
         with:
           name: formula-${{ github.ref_name }}
           path: Formula/microbridge.rb
+          retention-days: 7
 
   formula-smoke-public-assets:
     name: public-asset formula smoke (${{ matrix.arch }})

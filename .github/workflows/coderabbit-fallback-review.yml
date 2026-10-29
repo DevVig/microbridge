@@ -13,7 +13,8 @@ name: CodeRabbit fallback review
 on:
   schedule:
     # Stagger this minute when copying to other repos so they do not fire together.
-    - cron: "59 * * * *"
+    # Was hourly (`59 * * * *`); now once daily on weekdays.
+    - cron: "59 0 * * 1-5"
   issue_comment:
     types: [created]
   pull_request:
@@ -77,7 +78,7 @@ jobs:
           FALLBACK_COMMENT_BODY: ${{ github.event.comment.body }}
           # Pin one PR for issue_comment, workflow_dispatch(pr_number), and
           # pull_request (the triggering PR). Schedule leaves this empty so the
-          # hourly sweep can drain the backlog.
+          # weekday daily sweep can drain the backlog.
           FALLBACK_PR_NUMBER: ${{ inputs.pr_number || github.event.issue.number || github.event.pull_request.number }}
           # pull_request runs are always dry-run so opening this workflow cannot
           # comment on other PRs. schedule and issue_comment may post.
